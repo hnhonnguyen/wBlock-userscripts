@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tube Cleaner Plus
 // @namespace    com.skula.wblock
-// @version      0.3.6
+// @version      0.3.7
 // @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection, audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
 // @description:de  Bietet YouTube native Safari-Steuerelemente, Kapitel, Untertitel, SponsorBlock, Bild-in-Bild, Hintergrundwiedergabe, Qualitätsauswahl und einen Nur-Audio-Modus.
 // @description:es  Añade a YouTube controles nativos de Safari, capítulos, subtítulos, SponsorBlock, imagen en imagen, reproducción en segundo plano, selección de calidad y modo de solo audio.
@@ -74,7 +74,7 @@
     // ------------------------------------------------------------------
 
     var LOG_PREFIX = '[Tube Cleaner]';
-    var SCRIPT_VERSION = '0.3.6';
+    var SCRIPT_VERSION = '0.3.7';
     var STORAGE_AUDIO = 'wblock.tubeCleaner.audioOnly';
     var STORAGE_QUALITY = 'wblock.tubeCleaner.quality';
     var STORAGE_TOOLBAR_HIDDEN = 'wblock.tubeCleaner.hideToolbar';
@@ -4743,9 +4743,8 @@
     }
 
     function applyPlaybackSpeed(player, video, force) {
-        // Never touch the media element while WebKit owns it for background
-        // playback, and leave the stock element alone at the default rate.
-        if (!video || _realHidden || (player && player.classList.contains('ad-showing'))) return;
+        // Leave the stock element alone at the default rate.
+        if (!video || (player && player.classList.contains('ad-showing'))) return;
         var rate = getPreferredSpeed();
         if (!force && rate === 1) return;
         if (Math.abs(video.playbackRate - rate) <= 0.01) return;
@@ -4755,7 +4754,7 @@
     function setupPlaybackSpeed(player, video) {
         function apply() { applyPlaybackSpeed(player, video); }
         apply();
-        ['loadedmetadata', 'durationchange'].forEach(function (type) {
+        ['loadedmetadata', 'durationchange', 'play'].forEach(function (type) {
             video.addEventListener(type, apply);
         });
         var stopVisibility = observeRealVisibility(function () {
@@ -4763,7 +4762,7 @@
         });
         registerCleanup(function () {
             stopVisibility();
-            ['loadedmetadata', 'durationchange'].forEach(function (type) {
+            ['loadedmetadata', 'durationchange', 'play'].forEach(function (type) {
                 video.removeEventListener(type, apply);
             });
         });
