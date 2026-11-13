@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Tube Cleaner Plus
 // @namespace    com.skula.wblock
-// @version      0.2.0
-// @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection, audio-only mode, a saved default playback speed, and auto-next.
+// @version      0.3.0
+// @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection, audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
 // @description:de  Bietet YouTube native Safari-Steuerelemente, Kapitel, Untertitel, SponsorBlock, Bild-in-Bild, Hintergrundwiedergabe, Qualitätsauswahl und einen Nur-Audio-Modus.
 // @description:es  Añade a YouTube controles nativos de Safari, capítulos, subtítulos, SponsorBlock, imagen en imagen, reproducción en segundo plano, selección de calidad y modo de solo audio.
 // @description:fr  Ajoute à YouTube les commandes natives de Safari, les chapitres, les sous-titres, SponsorBlock, l’image dans l’image, la lecture en arrière-plan, le choix de qualité et le mode audio seul.
@@ -350,6 +350,46 @@
         storageSet(STORAGE_AUTO_NEXT, enabled ? '1' : '0');
     }
 
+    // Each tab keeps the watch order so Previous can return to the video the
+    // user actually came from when YouTube offers no playlist previous button.
+    var VIDEO_HISTORY_KEY = 'wblock.tubeCleaner.videoHistory';
+    var VIDEO_HISTORY_LIMIT = 50;
+    var pendingHistoryStep = 0;
+
+    function readVideoHistory() {
+        try {
+            var parsed = JSON.parse(sessionStorage.getItem(VIDEO_HISTORY_KEY) || 'null');
+            if (parsed && Array.isArray(parsed.ids) && parsed.ids.length) {
+                var index = Number(parsed.index);
+                return {
+                    ids: parsed.ids.slice(0, VIDEO_HISTORY_LIMIT),
+                    index: isFinite(index) ? Math.max(0, Math.min(index, parsed.ids.length - 1)) : parsed.ids.length - 1
+                };
+            }
+        } catch (e) { /* ignore */ }
+        return { ids: [], index: -1 };
+    }
+
+    function writeVideoHistory(state) {
+        try { sessionStorage.setItem(VIDEO_HISTORY_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+    }
+
+    function rememberVideoInHistory(videoId) {
+        if (!videoId) return;
+        var state = readVideoHistory();
+        if (state.ids[state.index] === videoId) { pendingHistoryStep = 0; return; }
+        if (pendingHistoryStep === -1 && state.index > 0 && state.ids[state.index - 1] === videoId) {
+            state.index -= 1;
+        } else {
+            state.ids = state.ids.slice(0, state.index + 1);
+            state.ids.push(videoId);
+            if (state.ids.length > VIDEO_HISTORY_LIMIT) state.ids.shift();
+            state.index = state.ids.length - 1;
+        }
+        pendingHistoryStep = 0;
+        writeVideoHistory(state);
+    }
+
     function getSubtitlePreference() {
         try {
             var raw = localStorage.getItem(STORAGE_SUBTITLES);
@@ -638,15 +678,21 @@
         '{ touch-action: manipulation !important; }',
 
         // Safari paints native <button> chrome light gray on hover. Keep the
-        // quality ladder on the dark menu instead of the system control look.
+        // quality ladder and speed ladder on dark menus instead of the system
+        // control look.
         '.wblock-tc-quality-menu,',
-        '.wblock-tc-quality-menu button',
+        '.wblock-tc-quality-menu button,',
+        '.wblock-tc-speed-menu,',
+        '.wblock-tc-speed-menu button',
         '{ color-scheme: dark; -webkit-appearance: none; appearance: none; }',
-        '.wblock-tc-quality-menu button',
+        '.wblock-tc-quality-menu button,',
+        '.wblock-tc-speed-menu button',
         '{ background: transparent !important; }',
-        '.wblock-tc-quality-menu button:hover',
+        '.wblock-tc-quality-menu button:hover,',
+        '.wblock-tc-speed-menu button:hover',
         '{ background: rgba(255,255,255,0.15) !important; }',
-        '.wblock-tc-quality-menu button:focus',
+        '.wblock-tc-quality-menu button:focus,',
+        '.wblock-tc-speed-menu button:focus',
         '{ outline: none; }',
 
         // YouTube reuses #movie_player for its floating miniplayer. Keep its
@@ -4161,6 +4207,7 @@
         var toolbarMissing = featureEnabled('toolbar') && !player.querySelector('.wblock-tc-toolbar');
         if (player.getAttribute(ATTR_CLEANED) === videoId && activeVideo === video && !toolbarMissing) return;
         player.setAttribute(ATTR_CLEANED, videoId);
+        rememberVideoInHistory(videoId);
 
         log('transforming player for', videoId || '(unknown)');
 
@@ -4733,6 +4780,41 @@
         return null;
     }
 
+    function goToNextVideo(player) {
+        var link = autoNextLink(player);
+        if (link) {
+            try { link.click(); return true; } catch (e) { /* ignore */ }
+        }
+        return false;
+    }
+
+    function previousVideoLink(player) {
+        var link = player.querySelector('a.ytp-prev-button[href]') ||
+            document.querySelector('a.ytp-prev-button[href]');
+        if (link) return link;
+        var button = player.querySelector('.ytp-prev-button') || document.querySelector('.ytp-prev-button');
+        if (button && !button.disabled && button.getAttribute('aria-disabled') !== 'true') return button;
+        return null;
+    }
+
+    function goToPreviousVideo(player) {
+        var link = previousVideoLink(player);
+        if (link) {
+            try { link.click(); return true; } catch (e) { /* ignore */ }
+        }
+        var state = readVideoHistory();
+        if (state.index > 0 && state.ids[state.index - 1]) {
+            pendingHistoryStep = -1;
+            location.href = location.origin + '/watch?v=' + encodeURIComponent(state.ids[state.index - 1]);
+            return true;
+        }
+        if (/youtube\.com\/watch/.test(document.referrer || '')) {
+            window.history.back();
+            return true;
+        }
+        return false;
+    }
+
     function setupAutoNext(player, video) {
         var timer = null;
         function onEnded() {
@@ -5230,7 +5312,7 @@
         speedBtn.type = 'button';
         speedBtn.style.cssText = btnStyle;
         var speedMenu = document.createElement('div');
-        speedMenu.className = 'wblock-tc-quality-menu wblock-tc-speed-menu';
+        speedMenu.className = 'wblock-tc-speed-menu';
         speedMenu.style.cssText = 'position:absolute;bottom:100%;right:0;margin-bottom:4px;box-sizing:border-box;' +
             'background:rgba(0,0,0,0.92);border-radius:5px;padding:' + (IS_IOS ? '8px 0' : '4px 0') + ';' +
             'min-width:' + (IS_IOS ? '140px' : '100px') + ';max-height:60vh;overflow-y:auto;' +
@@ -5298,7 +5380,32 @@
         });
         speedWrap.appendChild(speedBtn);
         speedWrap.appendChild(speedMenu);
-        playbackRow.appendChild(speedWrap);
+        servicesRow.appendChild(speedWrap);
+
+        // Previous / next transport pills. Next shares the auto-next target;
+        // previous prefers YouTube's playlist button, then this tab's history.
+        var prevBtn = document.createElement('button');
+        prevBtn.className = 'wblock-tc-prev-button';
+        prevBtn.type = 'button';
+        prevBtn.style.cssText = btnStyle;
+        prevBtn.textContent = 'Prev';
+        prevBtn.title = 'Previous video';
+        prevBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            goToPreviousVideo(player);
+        });
+        var nextBtn = document.createElement('button');
+        nextBtn.className = 'wblock-tc-next-button';
+        nextBtn.type = 'button';
+        nextBtn.style.cssText = btnStyle;
+        nextBtn.textContent = 'Next';
+        nextBtn.title = 'Next video';
+        nextBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            goToNextVideo(player);
+        });
+        playbackRow.appendChild(prevBtn);
+        playbackRow.appendChild(nextBtn);
 
         // Auto-next pill. On by default, matching YouTube's own autoplay.
         var autoNextBtn = document.createElement('button');
@@ -5318,7 +5425,7 @@
             setAutoNextEnabled(!isAutoNextEnabled());
             updateAutoNextBtn();
         });
-        playbackRow.appendChild(autoNextBtn);
+        servicesRow.appendChild(autoNextBtn);
 
         // PiP button is intentionally omitted — Safari's native controls
         // already provide PiP. Auto PiP handles automatic PiP entry.

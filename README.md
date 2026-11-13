@@ -12,6 +12,7 @@ This fork of Tube Cleaner adds two toolbar pills on YouTube watch pages:
 
 - **Speed pill** (`1x`): choose a playback rate; it is saved and applied to every video.
 - **Auto next pill** (`Auto next`): advances to the next video when playback ends. On by default; click to toggle.
+- **Prev / Next pills**: jump to the previous or next video. Previous prefers YouTube's playlist button, then falls back to the videos watched in this tab.
 
 Install this fork from:
 
