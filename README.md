@@ -14,6 +14,8 @@ This fork of Tube Cleaner adds two toolbar pills on YouTube watch pages:
 - **Auto next pill** (`Auto next`): advances to the next video when playback ends. On by default; click to toggle.
 - **Prev / Next pills**: jump to the previous or next video. Previous prefers YouTube's playlist button, then falls back to the videos watched in this tab.
 
+The fork declares `@grant none` on purpose. wBlock injects userscripts that request GM storage into the content world unless they are the upstream Tube Cleaner URL, and background playback needs the page world. SponsorBlock preferences fall back to `localStorage`. If you use wBlock, disable the built-in Tube Cleaner rather than deleting it; wBlock re-adds missing built-ins.
+
 Install this fork from:
 
 - `https://raw.githubusercontent.com/hnhonnguyen/wBlock-userscripts/main/packages/tube-cleaner/dist/tube-cleaner.user.js`

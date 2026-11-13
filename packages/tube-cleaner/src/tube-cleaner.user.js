@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tube Cleaner Plus
 // @namespace    com.skula.wblock
-// @version      0.3.4
+// @version      0.3.5
 // @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection, audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
 // @description:de  Bietet YouTube native Safari-Steuerelemente, Kapitel, Untertitel, SponsorBlock, Bild-in-Bild, Hintergrundwiedergabe, Qualitätsauswahl und einen Nur-Audio-Modus.
 // @description:es  Añade a YouTube controles nativos de Safari, capítulos, subtítulos, SponsorBlock, imagen en imagen, reproducción en segundo plano, selección de calidad y modo de solo audio.
@@ -33,11 +33,16 @@
 // @exclude      https://music.youtube.com/shorts/*/embed*
 // @run-at       document-start
 // @inject-into  page
-// @grant        GM_getValue
-// @grant        GM_setValue
+// @grant        none
 // @downloadURL  https://raw.githubusercontent.com/hnhonnguyen/wBlock-userscripts/main/packages/tube-cleaner/dist/tube-cleaner.user.js
 // @updateURL    https://raw.githubusercontent.com/hnhonnguyen/wBlock-userscripts/main/packages/tube-cleaner/dist/tube-cleaner.meta.js
 // ==/UserScript==
+
+// No GM grants is deliberate. wBlock routes userscripts that request GM
+// storage into the content world unless the URL is the built-in Tube Cleaner,
+// and content-world wrappers cannot mask document.hidden or media prototypes
+// for the page. Background playback needs the page world; SponsorBlock
+// preferences fall back to localStorage when GM storage is unavailable.
 
 (function () {
     'use strict';
@@ -69,7 +74,7 @@
     // ------------------------------------------------------------------
 
     var LOG_PREFIX = '[Tube Cleaner]';
-    var SCRIPT_VERSION = '0.3.4';
+    var SCRIPT_VERSION = '0.3.5';
     var STORAGE_AUDIO = 'wblock.tubeCleaner.audioOnly';
     var STORAGE_QUALITY = 'wblock.tubeCleaner.quality';
     var STORAGE_TOOLBAR_HIDDEN = 'wblock.tubeCleaner.hideToolbar';
