@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tube Cleaner Plus
 // @namespace    com.skula.wblock
-// @version      0.3.5
+// @version      0.3.6
 // @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection, audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
 // @description:de  Bietet YouTube native Safari-Steuerelemente, Kapitel, Untertitel, SponsorBlock, Bild-in-Bild, Hintergrundwiedergabe, Qualitätsauswahl und einen Nur-Audio-Modus.
 // @description:es  Añade a YouTube controles nativos de Safari, capítulos, subtítulos, SponsorBlock, imagen en imagen, reproducción en segundo plano, selección de calidad y modo de solo audio.
