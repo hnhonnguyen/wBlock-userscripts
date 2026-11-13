@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tube Cleaner Plus
 // @namespace    com.skula.wblock
-// @version      0.3.3
+// @version      0.3.4
 // @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection, audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
 // @description:de  Bietet YouTube native Safari-Steuerelemente, Kapitel, Untertitel, SponsorBlock, Bild-in-Bild, Hintergrundwiedergabe, Qualitätsauswahl und einen Nur-Audio-Modus.
 // @description:es  Añade a YouTube controles nativos de Safari, capítulos, subtítulos, SponsorBlock, imagen en imagen, reproducción en segundo plano, selección de calidad y modo de solo audio.
@@ -69,6 +69,7 @@
     // ------------------------------------------------------------------
 
     var LOG_PREFIX = '[Tube Cleaner]';
+    var SCRIPT_VERSION = '0.3.4';
     var STORAGE_AUDIO = 'wblock.tubeCleaner.audioOnly';
     var STORAGE_QUALITY = 'wblock.tubeCleaner.quality';
     var STORAGE_TOOLBAR_HIDDEN = 'wblock.tubeCleaner.hideToolbar';
@@ -2063,6 +2064,9 @@
         // iOS toolbar contains only a compact quality selector positioned above
         // Safari's native controls; playback remains owned by the video element.
         if (featureEnabled('toolbar')) buildToolbar(player, video);
+        // Registered before the background handlers so a custom rate can drop
+        // back to 1x before iOS resumes the media.
+        if (featureEnabled('playbackSpeed')) setupPlaybackSpeed(player, video);
         registerCleanup(setupAutoPiP(video, true));
         registerCleanup(setupBackgroundResume(video));
         registerCleanup(setupBackgroundRecovery(video, function () {
@@ -2070,7 +2074,6 @@
             if (request && request.catch) request.catch(function () {});
         }));
         setupMediaSession(player, video);
-        if (featureEnabled('playbackSpeed')) setupPlaybackSpeed(player, video);
         if (featureEnabled('autoNext')) setupAutoNext(player, video);
         setupLiveSeekGuard(player, video);
         if (featureEnabled('chapters')) setupChapters(player, video);
@@ -4751,7 +4754,12 @@
             video.addEventListener(type, apply);
         });
         var stopVisibility = observeRealVisibility(function () {
-            if (!_realHidden) apply();
+            if (!_realHidden) { apply(); return; }
+            // iOS resumes background audio at the default rate; a custom rate
+            // can make WebKit refuse that resume. Restore it when visible.
+            if (IS_IOS && featureEnabled('backgroundPlayback') && getPreferredSpeed() !== 1) {
+                try { video.playbackRate = 1; } catch (e) { /* ignore */ }
+            }
         });
         registerCleanup(function () {
             stopVisibility();
@@ -5268,7 +5276,10 @@
             donate.href = 'https://sponsor.ajay.app/donate/'; donate.target = '_blank'; donate.rel = 'noopener noreferrer';
             donate.textContent = locale.donate; donate.style.cssText = 'color:#69a9ff;text-decoration:none';
             credits.appendChild(credit); credits.appendChild(donate);
-            footer.appendChild(reset); footer.appendChild(credits); sponsorMenu.appendChild(footer);
+            var versionLabel = document.createElement('span');
+            versionLabel.textContent = 'TC+ v' + SCRIPT_VERSION;
+            versionLabel.style.cssText = 'color:#777;font-size:10px';
+            footer.appendChild(reset); footer.appendChild(versionLabel); footer.appendChild(credits); sponsorMenu.appendChild(footer);
 
         }
 
