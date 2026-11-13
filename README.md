@@ -4,14 +4,26 @@ Standalone userscripts maintained for wBlock. The raw `main` branch is the updat
 
 ## Packages
 
-- `packages/tube-cleaner`: native YouTube controls and playback features.
+- `packages/tube-cleaner`: native YouTube controls and playback features, plus this fork's saved default playback speed and auto-next pills.
+
+## Fork additions (hnhonnguyen)
+
+This fork of Tube Cleaner adds two toolbar pills on YouTube watch pages:
+
+- **Speed pill** (`1x`): choose a playback rate; it is saved and applied to every video.
+- **Auto next pill** (`Auto next`): advances to the next video when playback ends. On by default; click to toggle.
+
+Install this fork from:
+
+- `https://raw.githubusercontent.com/hnhonnguyen/wBlock-userscripts/main/packages/tube-cleaner/dist/tube-cleaner.user.js`
+
 - `packages/player-cleaner`: native controls for custom web players.
 - `packages/dearrow` replaces YouTube titles and thumbnails with community suggestions.
 - `packages/dark-reader`: Dark Reader's MIT-licensed API engine for wBlock, without the full site-fix database.
 
 Each package has editable `src/`, tracked generated `dist/`, and stable install metadata. Install from:
 
-- `https://raw.githubusercontent.com/0xCUB3/wBlock-userscripts/main/packages/tube-cleaner/dist/tube-cleaner.user.js`
+- `https://raw.githubusercontent.com/hnhonnguyen/wBlock-userscripts/main/packages/tube-cleaner/dist/tube-cleaner.user.js`
 - `https://raw.githubusercontent.com/0xCUB3/wBlock-userscripts/main/packages/player-cleaner/dist/player-cleaner.user.js`
 - `https://raw.githubusercontent.com/0xCUB3/wBlock-userscripts/main/packages/dark-reader/dist/dark-reader.user.js`
 - `https://raw.githubusercontent.com/0xCUB3/wBlock-userscripts/main/packages/dearrow/dist/dearrow.user.js`

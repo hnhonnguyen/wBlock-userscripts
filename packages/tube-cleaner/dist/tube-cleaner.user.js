@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Tube Cleaner
+// @name         Tube Cleaner Plus
 // @namespace    com.skula.wblock
-// @version      0.1.74
-// @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection, and audio-only mode.
+// @version      0.2.0
+// @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection, audio-only mode, a saved default playback speed, and auto-next.
 // @description:de  Bietet YouTube native Safari-Steuerelemente, Kapitel, Untertitel, SponsorBlock, Bild-in-Bild, Hintergrundwiedergabe, Qualitätsauswahl und einen Nur-Audio-Modus.
 // @description:es  Añade a YouTube controles nativos de Safari, capítulos, subtítulos, SponsorBlock, imagen en imagen, reproducción en segundo plano, selección de calidad y modo de solo audio.
 // @description:fr  Ajoute à YouTube les commandes natives de Safari, les chapitres, les sous-titres, SponsorBlock, l’image dans l’image, la lecture en arrière-plan, le choix de qualité et le mode audio seul.
@@ -12,8 +12,9 @@
 // @description:ko  YouTube에 Safari 네이티브 컨트롤, 챕터, 자막, SponsorBlock, PIP, 백그라운드 재생, 화질 선택 및 오디오 전용 모드를 추가합니다.
 // @description:ru  Добавляет YouTube нативные элементы управления Safari, главы, субтитры, SponsorBlock, картинку-в-картинке, фоновое воспроизведение, выбор качества и аудиорежим.
 // @description:zh-Hans  为 YouTube 添加 Safari 原生控件、章节、字幕、SponsorBlock、画中画、后台播放、画质选择和纯音频模式。
-// @author       wBlock
-// @homepageURL  https://github.com/0xCUB3/wBlock-userscripts
+// @author       wBlock (fork by hnhonnguyen)
+// @homepageURL  https://github.com/hnhonnguyen/wBlock-userscripts
+// @supportURL   https://github.com/hnhonnguyen/wBlock-userscripts/issues
 // @match        https://www.youtube.com/*
 // @match        https://youtube.com/*
 // @match        https://m.youtube.com/*
@@ -34,8 +35,8 @@
 // @inject-into  page
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @downloadURL  https://raw.githubusercontent.com/0xCUB3/wBlock-userscripts/main/packages/tube-cleaner/dist/tube-cleaner.user.js
-// @updateURL    https://raw.githubusercontent.com/0xCUB3/wBlock-userscripts/main/packages/tube-cleaner/dist/tube-cleaner.meta.js
+// @downloadURL  https://raw.githubusercontent.com/hnhonnguyen/wBlock-userscripts/main/packages/tube-cleaner/dist/tube-cleaner.user.js
+// @updateURL    https://raw.githubusercontent.com/hnhonnguyen/wBlock-userscripts/main/packages/tube-cleaner/dist/tube-cleaner.meta.js
 // ==/UserScript==
 
 (function () {
@@ -316,6 +317,37 @@
 
     function setPreferredQuality(q) {
         storageSet(STORAGE_QUALITY, q);
+    }
+
+    // Playback speed and auto-next live in origin storage instead of
+    // YouTube's player state so they survive the SPA swapping media elements.
+    var STORAGE_SPEED = 'wblock.tubeCleaner.playbackSpeed';
+    var STORAGE_AUTO_NEXT = 'wblock.tubeCleaner.autoNext';
+    var PLAYBACK_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+    function getPreferredSpeed() {
+        try {
+            var value = Number(localStorage.getItem(STORAGE_SPEED));
+            if (isFinite(value) && value >= 0.25 && value <= 16) return value;
+        } catch (e) { /* ignore */ }
+        return 1;
+    }
+
+    function setPreferredSpeed(rate) {
+        var value = isFinite(rate) ? Math.round(Math.min(16, Math.max(0.25, rate)) * 100) / 100 : 1;
+        storageSet(STORAGE_SPEED, String(value));
+        return value;
+    }
+
+    function isAutoNextEnabled() {
+        try {
+            var stored = localStorage.getItem(STORAGE_AUTO_NEXT);
+            return stored === null ? true : stored === '1';
+        } catch (e) { return true; }
+    }
+
+    function setAutoNextEnabled(enabled) {
+        storageSet(STORAGE_AUTO_NEXT, enabled ? '1' : '0');
     }
 
     function getSubtitlePreference() {
@@ -1992,6 +2024,8 @@
             if (request && request.catch) request.catch(function () {});
         }));
         setupMediaSession(player, video);
+        if (featureEnabled('playbackSpeed')) setupPlaybackSpeed(player, video);
+        if (featureEnabled('autoNext')) setupAutoNext(player, video);
         setupLiveSeekGuard(player, video);
         if (featureEnabled('chapters')) setupChapters(player, video);
         if (featureEnabled('captions')) setupNativeSubtitles(player, video);
@@ -2998,6 +3032,8 @@
             sponsorBlock: true,
             resumePosition: true,
             toolbar: true,
+            playbackSpeed: true,
+            autoNext: true,
             hideShorts: false
         };
         var injected = typeof __wblockTubeCleanerFeatures === 'object' ? __wblockTubeCleanerFeatures : null;
@@ -4651,6 +4687,77 @@
         menu.style.marginBottom = options.gap || '4px';
     }
 
+    function applyPlaybackSpeed(player, video) {
+        if (!video || (player && player.classList.contains('ad-showing'))) return;
+        var rate = getPreferredSpeed();
+        if (Math.abs(video.playbackRate - rate) <= 0.01 &&
+            Math.abs(video.defaultPlaybackRate - rate) <= 0.01) return;
+        try {
+            video.defaultPlaybackRate = rate;
+            video.playbackRate = rate;
+        } catch (e) { /* ignore */ }
+    }
+
+    function setupPlaybackSpeed(player, video) {
+        function apply() { applyPlaybackSpeed(player, video); }
+        apply();
+        ['loadedmetadata', 'play', 'durationchange', 'ratechange'].forEach(function (type) {
+            video.addEventListener(type, apply);
+        });
+        registerCleanup(function () {
+            ['loadedmetadata', 'play', 'durationchange', 'ratechange'].forEach(function (type) {
+                video.removeEventListener(type, apply);
+            });
+        });
+    }
+
+    function autoNextLink(player) {
+        var next = player.querySelector('a.ytp-next-button[href]') ||
+            document.querySelector('a.ytp-next-button[href]');
+        if (next) return next;
+        var selectors = [
+            '#movie_player .ytp-next-button',
+            '#movie_player .ytp-autonav-endscreen-button[href]',
+            '#secondary ytd-compact-video-renderer a#thumbnail[href*="/watch?v="]',
+            '#secondary ytd-rich-item-renderer a#thumbnail[href*="/watch?v="]',
+            'ytd-watch-flexy #secondary ytd-compact-video-renderer a#thumbnail[href*="/watch?v="]',
+            'ytd-watch-flexy #secondary ytd-rich-item-renderer a#thumbnail[href*="/watch?v="]',
+            'ytd-compact-video-renderer a#thumbnail[href*="/watch?v="]',
+            'ytm-compact-video-renderer a[href*="/watch?v="]',
+            'ytm-video-with-context-renderer a[href*="/watch?v="]'
+        ];
+        for (var i = 0; i < selectors.length; i++) {
+            var link = document.querySelector(selectors[i]);
+            if (link && link.href && /\/watch\?/.test(link.href)) return link;
+        }
+        return null;
+    }
+
+    function setupAutoNext(player, video) {
+        var timer = null;
+        function onEnded() {
+            if (!isAutoNextEnabled() || video.loop || isYouTubeLive(player) || timer !== null) return;
+            var startedHref = location.href;
+            var startedId = youtubeVideoIdentity(player);
+            // Give YouTube's own autoplay the first chance to advance. Only
+            // step in when the page has not navigated by the time we check.
+            timer = setTimeout(function () {
+                timer = null;
+                if (!isAutoNextEnabled() || !video.ended || location.href !== startedHref ||
+                    youtubeVideoIdentity(player) !== startedId) return;
+                var link = autoNextLink(player);
+                if (link) {
+                    try { link.click(); } catch (e) { /* ignore */ }
+                }
+            }, 800);
+        }
+        video.addEventListener('ended', onEnded);
+        registerCleanup(function () {
+            if (timer !== null) clearTimeout(timer);
+            video.removeEventListener('ended', onEnded);
+        });
+    }
+
     function buildToolbar(player, video) {
         var existing = player.querySelector('.wblock-tc-toolbar');
         if (existing) {
@@ -4781,6 +4888,7 @@
                 sponsorMenu.style.display = 'none';
                 if (sponsorBtn) sponsorBtn.setAttribute('aria-expanded', 'false');
             }
+            speedMenu.style.display = 'none';
             if (qualityMenu.style.display === 'none') {
                 buildQualityMenu();
                 if (IS_IOS) {
@@ -5088,6 +5196,7 @@
         sponsorBtn.addEventListener('click', function (e) {
             e.stopPropagation();
             qualityMenu.style.display = 'none';
+            speedMenu.style.display = 'none';
             if (sponsorMenu.style.display === 'none') {
                 buildSponsorMenu();
                 if (IS_IOS) {
@@ -5112,6 +5221,105 @@
         sponsorWrap.appendChild(sponsorBtn); sponsorWrap.appendChild(sponsorMenu); servicesRow.appendChild(sponsorWrap);
         }
 
+        // Playback speed. Picking a rate saves it as the default for every
+        // later video, so the pill doubles as the speed setting.
+        var speedWrap = document.createElement('div');
+        speedWrap.style.cssText = 'position:relative';
+        var speedBtn = document.createElement('button');
+        speedBtn.className = 'wblock-tc-speed-button';
+        speedBtn.type = 'button';
+        speedBtn.style.cssText = btnStyle;
+        var speedMenu = document.createElement('div');
+        speedMenu.className = 'wblock-tc-quality-menu wblock-tc-speed-menu';
+        speedMenu.style.cssText = 'position:absolute;bottom:100%;right:0;margin-bottom:4px;box-sizing:border-box;' +
+            'background:rgba(0,0,0,0.92);border-radius:5px;padding:' + (IS_IOS ? '8px 0' : '4px 0') + ';' +
+            'min-width:' + (IS_IOS ? '140px' : '100px') + ';max-height:60vh;overflow-y:auto;' +
+            '-webkit-overflow-scrolling:touch;display:none;z-index:70;font:' + (IS_IOS ? '16px' : '12px') +
+            '/1.8 -apple-system,system-ui,sans-serif';
+
+        function formatSpeed(rate) {
+            return String(Math.round(rate * 100) / 100) + 'x';
+        }
+        function updateSpeedBtn() {
+            speedBtn.textContent = formatSpeed(getPreferredSpeed());
+            speedBtn.title = 'Playback speed (saved for every video)';
+        }
+        updateSpeedBtn();
+
+        function buildSpeedMenu() {
+            while (speedMenu.firstChild) speedMenu.removeChild(speedMenu.firstChild);
+            var itemStyle = 'display:block;width:100%;border:0;background:transparent;font:inherit;line-height:inherit;' +
+                'text-align:left;padding:' + (IS_IOS ? '10px 16px' : '4px 12px') + ';cursor:pointer;color:#fff;' +
+                'white-space:nowrap;-webkit-appearance:none;appearance:none;touch-action:manipulation';
+            var current = getPreferredSpeed();
+            PLAYBACK_SPEEDS.forEach(function (rate) {
+                var item = document.createElement('button');
+                item.type = 'button';
+                item.style.cssText = itemStyle;
+                item.textContent = formatSpeed(rate);
+                if (Math.abs(rate - current) <= 0.001) item.style.color = '#4fc3f7';
+                item.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setPreferredSpeed(rate);
+                    applyPlaybackSpeed(player, video);
+                    updateSpeedBtn();
+                    speedMenu.style.display = 'none';
+                });
+                speedMenu.appendChild(item);
+            });
+        }
+
+        speedBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            qualityMenu.style.display = 'none';
+            if (sponsorMenu) {
+                sponsorMenu.style.display = 'none';
+                if (sponsorBtn) sponsorBtn.setAttribute('aria-expanded', 'false');
+            }
+            if (speedMenu.style.display === 'none') {
+                buildSpeedMenu();
+                if (IS_IOS) {
+                    showMobilePageOverlay(speedMenu, speedBtn, 520, 4);
+                } else {
+                    placeDesktopAnchoredMenu(speedMenu, { maxHeight: 0.6, gap: '4px' });
+                }
+                speedMenu.style.display = 'block';
+            } else {
+                speedMenu.style.display = 'none';
+            }
+        });
+        speedMenu.addEventListener('click', function (e) { e.stopPropagation(); });
+        function onSpeedOutsideClick() { speedMenu.style.display = 'none'; }
+        document.addEventListener('click', onSpeedOutsideClick);
+        registerCleanup(function () {
+            document.removeEventListener('click', onSpeedOutsideClick);
+            removeMobilePageOverlay(speedMenu);
+        });
+        speedWrap.appendChild(speedBtn);
+        speedWrap.appendChild(speedMenu);
+        playbackRow.appendChild(speedWrap);
+
+        // Auto-next pill. On by default, matching YouTube's own autoplay.
+        var autoNextBtn = document.createElement('button');
+        autoNextBtn.className = 'wblock-tc-autonext-button';
+        autoNextBtn.type = 'button';
+        autoNextBtn.style.cssText = btnStyle;
+        function updateAutoNextBtn() {
+            var on = isAutoNextEnabled();
+            autoNextBtn.textContent = IS_IOS ? 'Auto' : 'Auto next';
+            autoNextBtn.style.color = on ? '#4fc3f7' : '#aaa';
+            autoNextBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+            autoNextBtn.title = on ? 'Auto next is on (click to disable)' : 'Auto next is off (click to enable)';
+        }
+        updateAutoNextBtn();
+        autoNextBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            setAutoNextEnabled(!isAutoNextEnabled());
+            updateAutoNextBtn();
+        });
+        playbackRow.appendChild(autoNextBtn);
+
         // PiP button is intentionally omitted — Safari's native controls
         // already provide PiP. Auto PiP handles automatic PiP entry.
 
@@ -5122,7 +5330,7 @@
         var toolbarUserHidden = isToolbarHidden();
         var toolbarRevealOverride = false;
         function anyToolbarPanelOpen() {
-            var panels = [qualityMenu, sponsorMenu];
+            var panels = [qualityMenu, sponsorMenu, speedMenu];
             return panels.some(function (p) {
                 return p && p.style.display !== 'none' && p.style.display !== '';
             });
@@ -5224,7 +5432,7 @@
             function hideToolbar(force) {
                 // Never hide while a settings panel is open — the controls
                 // that opened it must remain reachable to close it again.
-                var panels = [qualityMenu, sponsorMenu];
+                var panels = [qualityMenu, sponsorMenu, speedMenu];
                 var anyOpen = panels.some(function (p) {
                     return p && p.style.display !== 'none' && p.style.display !== '';
                 });
@@ -5356,7 +5564,7 @@
             }
 
             function desktopPanelOpen() {
-                var panels = [qualityMenu, sponsorMenu];
+                var panels = [qualityMenu, sponsorMenu, speedMenu];
                 return panels.some(function (p) {
                     return p && p.style.display !== 'none' && p.style.display !== '';
                 });

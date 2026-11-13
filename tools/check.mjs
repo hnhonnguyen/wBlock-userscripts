@@ -6,8 +6,12 @@ import {cleanerDistribution, darkReaderDistribution} from './distribution.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const raw = 'https://raw.githubusercontent.com/0xCUB3/wBlock-userscripts/main';
+// The fork ships its own Tube Cleaner build so features survive updates.
+const rawFor = slug => slug === 'tube-cleaner'
+  ? 'https://raw.githubusercontent.com/hnhonnguyen/wBlock-userscripts/main'
+  : raw;
 const specs = [
-  ['tube-cleaner', '0.1.74'], ['player-cleaner', '0.1.57'], ['dearrow', '0.1.5'], ['dark-reader', '4.9.128-wblock.13']
+  ['tube-cleaner', '0.2.0'], ['player-cleaner', '0.1.57'], ['dearrow', '0.1.5'], ['dark-reader', '4.9.128-wblock.13']
 ];
 const fail = message => { throw new Error(message); };
 const metadata = text => {
@@ -32,7 +36,7 @@ for (const [slug, version] of specs.slice(0, -1)) {
   const meta = await readFile(join(root, `packages/${slug}/dist/${slug}.meta.js`), 'utf8');
   const a = metadata(source), b = metadata(dist), c = metadata(meta);
   if (a.fields.get('version') !== version || b.fields.get('version') !== version || c.fields.get('version') !== version) fail(`${slug}: version mismatch`);
-  const url = `${raw}/packages/${slug}/dist/${slug}`;
+  const url = `${rawFor(slug)}/packages/${slug}/dist/${slug}`;
   for (const x of [a,b,c]) { if (x.fields.get('downloadURL') !== `${url}.user.js` || x.fields.get('updateURL') !== `${url}.meta.js`) fail(`${slug}: URL mismatch`); }
   if (dist !== cleanerDistribution(slug, source, deArrowSource)) fail(`${slug}: generated userscript drift`);
   if (meta !== `${b.block}\n`) fail(`${slug}: generated metadata drift`);
