@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tube Cleaner Plus
 // @namespace    com.skula.wblock
-// @version      0.3.2
+// @version      0.3.3
 // @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection, audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
 // @description:de  Bietet YouTube native Safari-Steuerelemente, Kapitel, Untertitel, SponsorBlock, Bild-in-Bild, Hintergrundwiedergabe, Qualitätsauswahl und einen Nur-Audio-Modus.
 // @description:es  Añade a YouTube controles nativos de Safari, capítulos, subtítulos, SponsorBlock, imagen en imagen, reproducción en segundo plano, selección de calidad y modo de solo audio.
@@ -209,13 +209,8 @@
         var config = { blurEnters: IS_IPHONE };
         var state = { ours: false, enter: false, exit: false };
         function send(op) {
-            // iPhone delivers the focus loss before it suspends the video, so
-            // hide-time PiP on blur is the reliable background path there.
-            // The resume-first rule stays for iPad and for later hide events.
-            var hideAllowed = op === 'blur' && IS_IOS && featureEnabled('backgroundPlayback')
-                ? true : hidePiPAllowed();
             state = autoPiPStep(config, state, {
-                op: op, autoAllowed: autoPiPAllowed(), hideAllowed: hideAllowed,
+                op: op, autoAllowed: autoPiPAllowed(), hideAllowed: hidePiPAllowed(),
                 playing: !video.paused && !video.ended, focused: document.hasFocus(), hidden: _realHidden,
                 inPiP: isPiPActive(video)
             });
@@ -4739,24 +4734,20 @@
         menu.style.marginBottom = options.gap || '4px';
     }
 
-    function applyPlaybackSpeed(player, video) {
-        // WebKit is resuming the media for background playback; changing the
-        // rate then can fight its background state. The rate is applied again
-        // as soon as the page is visible.
+    function applyPlaybackSpeed(player, video, force) {
+        // Never touch the media element while WebKit owns it for background
+        // playback, and leave the stock element alone at the default rate.
         if (!video || _realHidden || (player && player.classList.contains('ad-showing'))) return;
         var rate = getPreferredSpeed();
-        if (Math.abs(video.playbackRate - rate) <= 0.01 &&
-            Math.abs(video.defaultPlaybackRate - rate) <= 0.01) return;
-        try {
-            video.defaultPlaybackRate = rate;
-            video.playbackRate = rate;
-        } catch (e) { /* ignore */ }
+        if (!force && rate === 1) return;
+        if (Math.abs(video.playbackRate - rate) <= 0.01) return;
+        try { video.playbackRate = rate; } catch (e) { /* ignore */ }
     }
 
     function setupPlaybackSpeed(player, video) {
         function apply() { applyPlaybackSpeed(player, video); }
         apply();
-        ['loadedmetadata', 'play', 'durationchange', 'ratechange'].forEach(function (type) {
+        ['loadedmetadata', 'durationchange'].forEach(function (type) {
             video.addEventListener(type, apply);
         });
         var stopVisibility = observeRealVisibility(function () {
@@ -4764,7 +4755,7 @@
         });
         registerCleanup(function () {
             stopVisibility();
-            ['loadedmetadata', 'play', 'durationchange', 'ratechange'].forEach(function (type) {
+            ['loadedmetadata', 'durationchange'].forEach(function (type) {
                 video.removeEventListener(type, apply);
             });
         });
@@ -5356,7 +5347,7 @@
                     e.preventDefault();
                     e.stopPropagation();
                     setPreferredSpeed(rate);
-                    applyPlaybackSpeed(player, video);
+                    applyPlaybackSpeed(player, video, true);
                     updateSpeedBtn();
                     speedMenu.style.display = 'none';
                 });

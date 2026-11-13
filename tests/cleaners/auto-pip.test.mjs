@@ -6,9 +6,8 @@ const source = readFileSync(new URL('../../packages/tube-cleaner/dist/tube-clean
 const browser = await webkit.launch();
 try {
   for (const device of [null, devices['iPhone 13']]) {
-    // On iPhone, focus loss enters hide-time PiP before WebKit suspends the
-    // video (tests/cleaners/background-resume.test.mjs covers the fallback).
-    // iPad keeps the resume-first path and only enters PiP once it is refused.
+    // On iPhone, background resume keeps playback going instead of hide-time
+    // PiP (tests/cleaners/background-resume.test.mjs covers its fallback).
     for (const config of [
       { name: 'app disabled', app: false, expected: false },
       { name: 'site disabled', app: true, site: '0', expected: false },
@@ -55,8 +54,7 @@ try {
       });
       const label = `${device ? 'iPhone' : 'desktop'} ${config.name}`;
       assert.equal(state.hiddenRequests, config.expected ? 1 : 0, `${label}: tab hiding`);
-      const blurExpected = device && config.background !== false ? 1 : 0;
-      assert.equal(state.blurRequests, blurExpected, `${label}: blur`);
+      assert.equal(state.blurRequests, device && config.expected ? 1 : 0, `${label}: blur`);
       assert.equal(state.backgroundPlayback, config.background !== false, `${label}: background playback`);
       assert.deepEqual(errors, [], `${label}: page errors`);
       console.log(`PASS ${label}`);
