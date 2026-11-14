@@ -93,7 +93,8 @@ try {
       const expectedGap = mobile ? 56 : name === 'macOS Safari 27' ? 58 : 130;
       assert.equal(geometry.gap, expectedGap, `${label}: toolbar must clear the native controls`);
       assert.equal(geometry.qualityGap, geometry.gap, `${label}: quality is nearest the native strip`);
-      assert.ok(geometry.sponsorGap > geometry.qualityGap, `${label}: SB stays above quality`);
+      if (mobile) assert.equal(geometry.sponsorGap, geometry.qualityGap, `${label}: SB shares the compact row`);
+      else assert.ok(geometry.sponsorGap > geometry.qualityGap, `${label}: SB stays above quality`);
       assert.equal(geometry.audioGap, mobile ? null : geometry.gap, `${label}: audio aligns with quality only on macOS`);
       assert.equal(geometry.safeArea, mobile, `${label}: preserve mobile safe-area positioning`);
       assert.ok(geometry.right >= 8 && geometry.inside && geometry.qualityHit, `${label}: buttons stay inside the video and clickable`);

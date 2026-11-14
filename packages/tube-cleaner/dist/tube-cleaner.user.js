@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tube Cleaner Plus
 // @namespace    com.skula.wblock
-// @version      0.4.1
+// @version      0.4.2
 // @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection, audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
 // @description:de  Bietet YouTube native Safari-Steuerelemente, Kapitel, Untertitel, SponsorBlock, Bild-in-Bild, Hintergrundwiedergabe, Qualitätsauswahl und einen Nur-Audio-Modus.
 // @description:es  Añade a YouTube controles nativos de Safari, capítulos, subtítulos, SponsorBlock, imagen en imagen, reproducción en segundo plano, selección de calidad y modo de solo audio.
@@ -74,7 +74,7 @@
     // ------------------------------------------------------------------
 
     var LOG_PREFIX = '[Tube Cleaner]';
-    var SCRIPT_VERSION = '0.4.1';
+    var SCRIPT_VERSION = '0.4.2';
     var STORAGE_AUDIO = 'wblock.tubeCleaner.audioOnly';
     var STORAGE_QUALITY = 'wblock.tubeCleaner.quality';
     var STORAGE_TOOLBAR_HIDDEN = 'wblock.tubeCleaner.hideToolbar';
@@ -4881,10 +4881,14 @@
         var servicesRow = document.createElement('div');
         servicesRow.className = 'wblock-tc-services-row';
         servicesRow.style.cssText = 'display:flex;gap:6px;align-items:center;justify-content:' + rowJustify;
-        // Services (SB) sit on top; the quality picker is the row nearest the
-        // native control strip so the pill people reach for most is lowest.
-        toolbar.appendChild(servicesRow);
-        toolbar.appendChild(playbackRow);
+        // iPhone gets one compact row. The desktop keeps services above the
+        // quality row so the quality pill stays nearest the native strip.
+        if (IS_IOS) {
+            toolbar.appendChild(playbackRow);
+        } else {
+            toolbar.appendChild(servicesRow);
+            toolbar.appendChild(playbackRow);
+        }
 
         // Quality selector
         var qualityBtn = document.createElement('button');
@@ -5213,6 +5217,10 @@
             sponsorMenu.appendChild(sponsorCheckboxRow(locale.hideControls, isToolbarHidden(), function (checked) {
                 setToolbarHidden(checked);
             }));
+            sponsorMenu.appendChild(sponsorCheckboxRow('Auto next', isAutoNextEnabled(), function (checked) {
+                setAutoNextEnabled(checked);
+                updateAutoNextBtn();
+            }));
             var durationRow = document.createElement('label');
             durationRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0';
             var durationLabel = document.createElement('span');
@@ -5317,7 +5325,8 @@
             removeMobilePageOverlay(sponsorMenu);
         });
         updateSponsorButton();
-        sponsorWrap.appendChild(sponsorBtn); sponsorWrap.appendChild(sponsorMenu); servicesRow.appendChild(sponsorWrap);
+        sponsorWrap.appendChild(sponsorBtn); sponsorWrap.appendChild(sponsorMenu);
+        if (!IS_IOS) servicesRow.appendChild(sponsorWrap);
         }
 
         // Playback speed. Picking a rate saves it as the default for every
@@ -5397,7 +5406,7 @@
         });
         speedWrap.appendChild(speedBtn);
         speedWrap.appendChild(speedMenu);
-        servicesRow.appendChild(speedWrap);
+        (IS_IOS ? playbackRow : servicesRow).appendChild(speedWrap);
 
         // Previous / next transport pills. Next shares the auto-next target;
         // previous prefers YouTube's playlist button, then this tab's history.
@@ -5405,8 +5414,9 @@
         prevBtn.className = 'wblock-tc-prev-button';
         prevBtn.type = 'button';
         prevBtn.style.cssText = btnStyle;
-        prevBtn.textContent = 'Prev';
+        prevBtn.textContent = '\u2039';
         prevBtn.title = 'Previous video';
+        prevBtn.setAttribute('aria-label', 'Previous video');
         prevBtn.addEventListener('click', function (e) {
             e.stopPropagation();
             goToPreviousVideo(player);
@@ -5415,8 +5425,9 @@
         nextBtn.className = 'wblock-tc-next-button';
         nextBtn.type = 'button';
         nextBtn.style.cssText = btnStyle;
-        nextBtn.textContent = 'Next';
+        nextBtn.textContent = '\u203A';
         nextBtn.title = 'Next video';
+        nextBtn.setAttribute('aria-label', 'Next video');
         nextBtn.addEventListener('click', function (e) {
             e.stopPropagation();
             goToNextVideo(player);
@@ -5442,7 +5453,8 @@
             setAutoNextEnabled(!isAutoNextEnabled());
             updateAutoNextBtn();
         });
-        servicesRow.appendChild(autoNextBtn);
+        if (!IS_IOS) servicesRow.appendChild(autoNextBtn);
+        if (IS_IOS && featureEnabled('sponsorBlock')) playbackRow.appendChild(sponsorWrap);
 
         // PiP button is intentionally omitted — Safari's native controls
         // already provide PiP. Auto PiP handles automatic PiP entry.
