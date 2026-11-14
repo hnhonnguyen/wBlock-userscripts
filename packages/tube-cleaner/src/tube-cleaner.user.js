@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tube Cleaner Plus
 // @namespace    com.skula.wblock
-// @version      0.4.0
+// @version      0.4.1
 // @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection, audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
 // @description:de  Bietet YouTube native Safari-Steuerelemente, Kapitel, Untertitel, SponsorBlock, Bild-in-Bild, Hintergrundwiedergabe, Qualitätsauswahl und einen Nur-Audio-Modus.
 // @description:es  Añade a YouTube controles nativos de Safari, capítulos, subtítulos, SponsorBlock, imagen en imagen, reproducción en segundo plano, selección de calidad y modo de solo audio.
@@ -74,7 +74,7 @@
     // ------------------------------------------------------------------
 
     var LOG_PREFIX = '[Tube Cleaner]';
-    var SCRIPT_VERSION = '0.4.0';
+    var SCRIPT_VERSION = '0.4.1';
     var STORAGE_AUDIO = 'wblock.tubeCleaner.audioOnly';
     var STORAGE_QUALITY = 'wblock.tubeCleaner.quality';
     var STORAGE_TOOLBAR_HIDDEN = 'wblock.tubeCleaner.hideToolbar';
@@ -685,7 +685,7 @@
         '{ touch-action: manipulation !important; }',
         '.wblock-tc-handle:hover,',
         '.wblock-tc-handle:focus',
-        '{ opacity: 0.8 !important; }',
+        '{ opacity: 0.9 !important; }',
 
         // Safari paints native <button> chrome light gray on hover. Keep the
         // quality ladder and speed ladder on dark menus instead of the system
@@ -5474,18 +5474,39 @@
         var handleBottom = IS_IOS ? 'calc(56px + env(safe-area-inset-bottom, 0px))'
             : (SAFARI_MAJOR >= 27 ? '58px' : '130px');
         var handleRight = IS_IOS ? 'max(8px, env(safe-area-inset-right, 0px))' : '8px';
-        var handleSize = IS_IOS ? '36px' : '26px';
+        var handleSize = IS_IOS ? '38px' : '28px';
         handle.style.cssText = 'position:absolute;bottom:' + handleBottom + ';right:' + handleRight +
             ';z-index:2147483647;display:none;width:' + handleSize + ';height:' + handleSize +
-            ';padding:0;border:0;border-radius:50%;background:rgba(0,0,0,0.55);color:#fff;' +
+            ';padding:0;border:0;border-radius:50%;background:rgba(0,0,0,0.6);color:#fff;' +
+            'box-shadow:0 0 0 1px rgba(255,255,255,0.4),0 1px 4px rgba(0,0,0,0.5);' +
             'font:' + (IS_IOS ? '20px' : '17px') + '/1 -apple-system,system-ui,sans-serif;' +
             'opacity:0;transition:opacity 0.15s;cursor:pointer;-webkit-user-select:none;user-select:none;' +
             'pointer-events:auto;touch-action:manipulation';
+        var handleIntroTimer = null;
+        var handleIntroDone = false;
         function setHandleVisible(visible) {
             var show = !!visible && !toolbarUserHidden;
             handle.style.display = show ? 'block' : 'none';
-            handle.style.opacity = show ? '0.35' : '0';
-            handle.style.pointerEvents = show ? 'auto' : 'none';
+            if (!show) {
+                clearTimeout(handleIntroTimer);
+                handleIntroTimer = null;
+                handle.style.opacity = '0';
+                handle.style.pointerEvents = 'none';
+                return;
+            }
+            handle.style.pointerEvents = 'auto';
+            // A brighter first appearance makes the collapsed toolbar easy to
+            // find right after the page loads.
+            if (!handleIntroDone) {
+                handleIntroDone = true;
+                handle.style.opacity = '0.9';
+                handleIntroTimer = setTimeout(function () {
+                    handleIntroTimer = null;
+                    if (handle.style.display !== 'none') handle.style.opacity = '0.5';
+                }, 2500);
+            } else {
+                handle.style.opacity = '0.5';
+            }
         }
         var openToolbarFromHandle = function () {};
         handle.addEventListener('click', function (e) {
@@ -5495,6 +5516,7 @@
         });
         player.appendChild(handle);
         registerCleanup(function () {
+            clearTimeout(handleIntroTimer);
             if (handle.parentNode) handle.parentNode.removeChild(handle);
         });
 

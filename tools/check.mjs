@@ -11,7 +11,7 @@ const rawFor = slug => slug === 'tube-cleaner'
   ? 'https://raw.githubusercontent.com/hnhonnguyen/wBlock-userscripts/main'
   : raw;
 const specs = [
-  ['tube-cleaner', '0.4.0'], ['player-cleaner', '0.1.57'], ['dearrow', '0.1.5'], ['dark-reader', '4.9.128-wblock.13']
+  ['tube-cleaner', '0.4.1'], ['player-cleaner', '0.1.57'], ['dearrow', '0.1.5'], ['dark-reader', '4.9.128-wblock.13']
 ];
 const fail = message => { throw new Error(message); };
 const metadata = text => {
