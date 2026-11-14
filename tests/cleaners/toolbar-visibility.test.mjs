@@ -47,6 +47,8 @@ try {
     // Safari's private control tree cannot be measured from page JavaScript.
     // Check the public video/toolbar geometry instead, including short players
     // where reserving the expanded volume slider's height put pills mid-video.
+    // The smart default keeps the toolbar collapsed, so open it first.
+    await page.evaluate(() => document.querySelector('.wblock-tc-handle').click());
     const layouts = mobile ? [null] : [
       { width: 320, height: 180 }, { width: 960, height: 540 },
       { width: 1280, height: 720 }
@@ -145,7 +147,9 @@ try {
       assert.equal(await visible(), false, 'leaving the player hides controls immediately');
       await mouse('mousemove');
       await page.clock.runFor(50);
-      assert.equal(await visible(), true, 're-entering the player shows controls immediately');
+      assert.equal(await visible(), false, 'moving over the video must not reopen the toolbar');
+      await page.evaluate(() => document.querySelector('.wblock-tc-handle').click());
+      assert.equal(await visible(), true, 'the handle opens the toolbar');
       await mouse('mouseout', '#movie_player', null);
       await page.clock.runFor(50);
       assert.equal(await visible(), false, 'leaving the window from the player hides controls immediately');
@@ -175,6 +179,7 @@ try {
     await page.clock.runFor(4100);
     assert.equal(await visible(), false);
     if (!mobile) {
+      await page.evaluate(() => document.querySelector('.wblock-tc-handle').click());
       await pointer('pointermove', true);
       await page.clock.runFor(4100);
       assert.equal(await visible(), true, 'hovering the native bottom control area must not fade custom controls');
@@ -204,7 +209,7 @@ try {
     }
     await state({ paused: true }, 'pause');
     await page.clock.runFor(4100);
-    assert.equal(await visible(), true, 'pause cancels pending hides');
+    assert.equal(await visible(), false, 'pausing lets the toolbar collapse to the handle');
     await state({ paused: false, ended: false }, 'play');
     await page.clock.runFor(4100);
     await state({ ended: true }, 'ended');

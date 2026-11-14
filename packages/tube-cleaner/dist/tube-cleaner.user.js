@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tube Cleaner Plus
 // @namespace    com.skula.wblock
-// @version      0.3.7
+// @version      0.4.0
 // @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection, audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
 // @description:de  Bietet YouTube native Safari-Steuerelemente, Kapitel, Untertitel, SponsorBlock, Bild-in-Bild, Hintergrundwiedergabe, Qualitätsauswahl und einen Nur-Audio-Modus.
 // @description:es  Añade a YouTube controles nativos de Safari, capítulos, subtítulos, SponsorBlock, imagen en imagen, reproducción en segundo plano, selección de calidad y modo de solo audio.
@@ -74,7 +74,7 @@
     // ------------------------------------------------------------------
 
     var LOG_PREFIX = '[Tube Cleaner]';
-    var SCRIPT_VERSION = '0.3.7';
+    var SCRIPT_VERSION = '0.4.0';
     var STORAGE_AUDIO = 'wblock.tubeCleaner.audioOnly';
     var STORAGE_QUALITY = 'wblock.tubeCleaner.quality';
     var STORAGE_TOOLBAR_HIDDEN = 'wblock.tubeCleaner.hideToolbar';
@@ -574,6 +574,7 @@
         // The toolbar box itself stays transparent to the pointer: its empty
         // corners overlap Safari's volume slider, which closes on mouseleave.
         '.wblock-tc-toolbar *,',
+        '.wblock-tc-native .wblock-tc-handle,',
         '.wblock-tc-native .wblock-tc-sponsor-notice,',
         '.wblock-tc-native .wblock-tc-sponsor-notice *',
         '{ pointer-events: auto !important; }',
@@ -682,6 +683,9 @@
         // Prevent iOS double-tap zoom on toolbar buttons.
         '.wblock-tc-toolbar button, .wblock-tc-toolbar div',
         '{ touch-action: manipulation !important; }',
+        '.wblock-tc-handle:hover,',
+        '.wblock-tc-handle:focus',
+        '{ opacity: 0.8 !important; }',
 
         // Safari paints native <button> chrome light gray on hover. Keep the
         // quality ladder and speed ladder on dark menus instead of the system
@@ -5459,6 +5463,41 @@
             return toolbarUserHidden && !toolbarRevealOverride && !anyToolbarPanelOpen();
         }
 
+        // A small handle is the only always-available entry point; the full
+        // toolbar stays collapsed so playback is barely covered.
+        var handle = document.createElement('button');
+        handle.className = 'wblock-tc-handle';
+        handle.type = 'button';
+        handle.textContent = '\u22EF';
+        handle.setAttribute('aria-label', 'Show video controls');
+        handle.title = 'Show video controls';
+        var handleBottom = IS_IOS ? 'calc(56px + env(safe-area-inset-bottom, 0px))'
+            : (SAFARI_MAJOR >= 27 ? '58px' : '130px');
+        var handleRight = IS_IOS ? 'max(8px, env(safe-area-inset-right, 0px))' : '8px';
+        var handleSize = IS_IOS ? '36px' : '26px';
+        handle.style.cssText = 'position:absolute;bottom:' + handleBottom + ';right:' + handleRight +
+            ';z-index:2147483647;display:none;width:' + handleSize + ';height:' + handleSize +
+            ';padding:0;border:0;border-radius:50%;background:rgba(0,0,0,0.55);color:#fff;' +
+            'font:' + (IS_IOS ? '20px' : '17px') + '/1 -apple-system,system-ui,sans-serif;' +
+            'opacity:0;transition:opacity 0.15s;cursor:pointer;-webkit-user-select:none;user-select:none;' +
+            'pointer-events:auto;touch-action:manipulation';
+        function setHandleVisible(visible) {
+            var show = !!visible && !toolbarUserHidden;
+            handle.style.display = show ? 'block' : 'none';
+            handle.style.opacity = show ? '0.35' : '0';
+            handle.style.pointerEvents = show ? 'auto' : 'none';
+        }
+        var openToolbarFromHandle = function () {};
+        handle.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            openToolbarFromHandle();
+        });
+        player.appendChild(handle);
+        registerCleanup(function () {
+            if (handle.parentNode) handle.parentNode.removeChild(handle);
+        });
+
         // WebKit's AutoHideController uses a four-second idle deadline and
         // suspends it during pointer interaction. Its shadow-tree visibility
         // is private, so mirror the public input and playback signals.
@@ -5477,7 +5516,7 @@
         }
         function bindNativeToolbarInteractions(show, schedule) {
             function down(event) {
-                if (!player.contains(event.target)) return;
+                if (!player.contains(event.target) || handle.contains(event.target)) return;
                 toolbarPointers.add(event.pointerId);
                 clearTimeout(toolbarTimer);
                 if (event.pointerType === 'mouse') show();
@@ -5489,8 +5528,11 @@
                 if (event.pointerType !== 'mouse') return;
                 var wasHovering = nativeControlHover;
                 nativeControlHover = event.target === video && overNativeControlStrip(event.clientX, event.clientY);
-                if (player.contains(event.target)) { show(); schedule(); }
-                else if (wasHovering) schedule();
+                if (player.contains(event.target)) {
+                    if (toolbar.style.opacity === '1') schedule();
+                } else if (wasHovering) {
+                    schedule();
+                }
             }
             function leave(event) {
                 nativeControlHover = false;
@@ -5545,6 +5587,7 @@
 
             function showToolbar() {
                 if (toolbarSuppressed()) return;
+                setHandleVisible(false);
                 toolbar.style.opacity = '1';
                 toolbar.classList.remove('wblock-tc-toolbar-hidden');
                 clearTimeout(toolbarTimer);
@@ -5556,14 +5599,17 @@
                 var anyOpen = panels.some(function (p) {
                     return p && p.style.display !== 'none' && p.style.display !== '';
                 });
-                if (anyOpen || (!force && !toolbarSuppressed() &&
-                    (toolbarInteractionActive() || video.paused || video.ended))) { scheduleHideToolbar(); return; }
+                if (anyOpen || (!force && !toolbarSuppressed() && toolbarInteractionActive())) {
+                    scheduleHideToolbar();
+                    return;
+                }
                 toolbar.style.opacity = '0';
                 toolbar.classList.add('wblock-tc-toolbar-hidden');
+                setHandleVisible(true);
             }
             function scheduleHideToolbar() {
                 clearTimeout(toolbarTimer);
-                if (!toolbarUserHidden && (toolbarInteractionActive() || video.paused || video.ended)) return;
+                if (!toolbarUserHidden && toolbarInteractionActive()) return;
                 toolbarTimer = setTimeout(hideToolbar, TOOLBAR_HIDE_DELAY);
             }
 
@@ -5605,12 +5651,8 @@
             function onToolbarPref() {
                 toolbarUserHidden = isToolbarHidden();
                 toolbarRevealOverride = false;
-                if (toolbarUserHidden) {
-                    scheduleHideToolbar();
-                } else {
-                    showToolbar();
-                    if (!video.paused && !video.ended) { scheduleHideToolbar(); }
-                }
+                hideToolbar(true);
+                setHandleVisible(!toolbarUserHidden);
             }
             document.addEventListener('wblock-tc-toolbar-pref', onToolbarPref);
 
@@ -5626,23 +5668,25 @@
                 if (!video.paused && !video.ended) { scheduleHideToolbar(); }
             });
 
-            // Auto-hide shortly after playback starts; show again on pause.
+            // Auto-hide shortly after playback starts; pausing also lets the
+            // toolbar collapse back to the handle.
             function onVideoPlay() { scheduleHideToolbar(); }
-            function onVideoPause() { showToolbar(); }
+            function onVideoPause() { scheduleHideToolbar(); }
             video.addEventListener('play', onVideoPlay);
             video.addEventListener('pause', onVideoPause);
 
+            openToolbarFromHandle = function () {
+                showToolbar();
+                scheduleHideToolbar();
+            };
+
             bindNativeToolbarInteractions(showToolbar, scheduleHideToolbar);
 
-            // Initial state: visible if paused, auto-hide once playing. The
-            // hide preference starts it hidden outright.
-            if (toolbarUserHidden) {
-                toolbar.style.opacity = '0';
-                toolbar.classList.add('wblock-tc-toolbar-hidden');
-            } else {
-                showToolbar();
-                if (!video.paused && !video.ended) { scheduleHideToolbar(); }
-            }
+            // Smart default: only the handle is visible. The toolbar opens on
+            // a tap or on a tap of the handle.
+            toolbar.style.opacity = '0';
+            toolbar.classList.add('wblock-tc-toolbar-hidden');
+            setHandleVisible(!toolbarUserHidden);
 
             registerCleanup(function () {
                 clearTimeout(toolbarTimer);
@@ -5701,6 +5745,7 @@
 
             function showToolbar() {
                 if (toolbarSuppressed()) return;
+                setHandleVisible(false);
                 toolbar.style.opacity = '1';
                 toolbar.classList.remove('wblock-tc-toolbar-hidden');
                 clearTimeout(toolbarTimer);
@@ -5708,17 +5753,18 @@
             }
 
             function hideToolbar() {
-                if (!toolbarSuppressed() && (desktopPanelOpen() || _isOverToolbar || toolbarInteractionActive() || video.paused || video.ended)) {
+                if (!toolbarSuppressed() && (desktopPanelOpen() || _isOverToolbar || toolbarInteractionActive())) {
                     showToolbar();
                     return;
                 }
                 toolbar.style.opacity = '0';
                 toolbar.classList.add('wblock-tc-toolbar-hidden');
+                setHandleVisible(true);
                 syncScrim();
             }
 
             function scheduleHideToolbar() {
-                if (!toolbarSuppressed() && (desktopPanelOpen() || _isOverToolbar || toolbarInteractionActive() || video.paused || video.ended)) {
+                if (!toolbarSuppressed() && (desktopPanelOpen() || _isOverToolbar || toolbarInteractionActive())) {
                     showToolbar();
                     return;
                 }
@@ -5734,8 +5780,7 @@
                 var over = pointOverPlayer(e.clientX, e.clientY);
                 if (over) {
                     _isOverPlayer = true;
-                    showToolbar();
-                    scheduleHideToolbar();
+                    if (toolbar.style.opacity === '1') scheduleHideToolbar();
                     return;
                 }
                 if (_isOverPlayer || _isOverToolbar) {
@@ -5752,8 +5797,7 @@
 
             function onPlayerMouseEnter() {
                 _isOverPlayer = true;
-                showToolbar();
-                scheduleHideToolbar();
+                if (toolbar.style.opacity === '1') scheduleHideToolbar();
             }
             function onPlayerMouseLeave() {
                 _isOverPlayer = false;
@@ -5790,7 +5834,7 @@
             function onVideoPlay() { scheduleHideToolbar(); }
             video.addEventListener('play', onVideoPlay);
 
-            function onVideoPause() { showToolbar(); }
+            function onVideoPause() { scheduleHideToolbar(); }
             video.addEventListener('pause', onVideoPause);
 
             // Double-click reveals (or re-hides) the toolbar while the hide
@@ -5810,7 +5854,8 @@
             function onToolbarPref() {
                 toolbarUserHidden = isToolbarHidden();
                 toolbarRevealOverride = false;
-                if (toolbarUserHidden) { scheduleHideToolbar(); }
+                hideToolbar();
+                setHandleVisible(!toolbarUserHidden);
             }
             document.addEventListener('wblock-tc-toolbar-pref', onToolbarPref);
 
@@ -5824,13 +5869,16 @@
             }
             video.addEventListener('webkitpresentationmodechanged', onPresentationModeChange);
 
-            bindNativeToolbarInteractions(showToolbar, scheduleHideToolbar);
-
-            // Match the initially visible native controls without requiring movement.
-            if (!toolbarUserHidden) {
+            openToolbarFromHandle = function () {
                 showToolbar();
                 scheduleHideToolbar();
-            }
+            };
+
+            bindNativeToolbarInteractions(showToolbar, scheduleHideToolbar);
+
+            // Smart default: only the handle is visible until the pointer
+            // reaches it or the player is clicked.
+            setHandleVisible(!toolbarUserHidden);
 
             registerCleanup(function () {
                 clearTimeout(toolbarTimer);
