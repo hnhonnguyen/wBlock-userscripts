@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tube Cleaner Plus
 // @namespace    com.skula.wblock
-// @version      0.4.4
+// @version      0.4.5
 // @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection (including Shorts), audio-track selection, audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
 // @description:de  Bietet YouTube native Safari-Steuerelemente, Kapitel, Untertitel, SponsorBlock, Bild-in-Bild, Hintergrundwiedergabe, Qualitätsauswahl und einen Nur-Audio-Modus.
 // @description:es  Añade a YouTube controles nativos de Safari, capítulos, subtítulos, SponsorBlock, imagen en imagen, reproducción en segundo plano, selección de calidad y modo de solo audio.
@@ -74,7 +74,7 @@
     // ------------------------------------------------------------------
 
     var LOG_PREFIX = '[Tube Cleaner]';
-    var SCRIPT_VERSION = '0.4.4';
+    var SCRIPT_VERSION = '0.4.5';
     var STORAGE_AUDIO = 'wblock.tubeCleaner.audioOnly';
     var STORAGE_AUDIO_TRACK = 'wblock.tubeCleaner.audioLanguage';
     var STORAGE_QUALITY = 'wblock.tubeCleaner.quality';
@@ -5035,6 +5035,83 @@
         state.video = null;
     }
 
+    // Shorts do not always register as active media with iOS, so the idle
+    // timer can lock the screen mid-Short. Hold a screen wake lock while the
+    // reel is playing and release it as soon as playback stops or Safari hides.
+    function setupShortsWakeLock(video) {
+        if (!IS_IOS || !video || !navigator.wakeLock ||
+            typeof navigator.wakeLock.request !== 'function') {
+            return function () {};
+        }
+        var sentinel = null;
+        var pending = false;
+        var disposed = false;
+        function wanted() {
+            return !disposed && !video.paused && !video.ended && !_realHidden;
+        }
+        function release() {
+            var lock = sentinel;
+            sentinel = null;
+            if (!lock) return;
+            try {
+                var request = lock.release();
+                if (request && request.catch) request.catch(function () {});
+            } catch (e) { /* ignore */ }
+        }
+        function acquire() {
+            if (!wanted() || sentinel || pending) return;
+            pending = true;
+            try {
+                navigator.wakeLock.request('screen').then(function (lock) {
+                    pending = false;
+                    if (!wanted()) {
+                        try {
+                            var request = lock.release();
+                            if (request && request.catch) request.catch(function () {});
+                        } catch (e) { /* ignore */ }
+                        return;
+                    }
+                    sentinel = lock;
+                    lock.addEventListener('release', function () {
+                        if (sentinel === lock) sentinel = null;
+                    });
+                }).catch(function (e) {
+                    pending = false;
+                    log('screen wake lock refused', e);
+                });
+            } catch (e) {
+                pending = false;
+                log('screen wake lock failed', e);
+            }
+        }
+        function onPlay() { acquire(); }
+        function onStop() { release(); }
+        function onInput() { acquire(); }
+        var stopVisibility = observeRealVisibility(function () {
+            if (_realHidden) release();
+            else acquire();
+        });
+        var inputs = ['pointerup', 'touchend', 'click', 'keydown'];
+        inputs.forEach(function (type) { window.addEventListener(type, onInput, true); });
+        video.addEventListener('play', onPlay);
+        video.addEventListener('playing', onPlay);
+        video.addEventListener('pause', onStop);
+        video.addEventListener('ended', onStop);
+        window.addEventListener('pagehide', onStop);
+        acquire();
+        return function () {
+            disposed = true;
+            release();
+            stopVisibility();
+            inputs.forEach(function (type) { window.removeEventListener(type, onInput, true); });
+            video.removeEventListener('play', onPlay);
+            video.removeEventListener('playing', onPlay);
+            video.removeEventListener('pause', onStop);
+            video.removeEventListener('ended', onStop);
+            window.removeEventListener('pagehide', onStop);
+        };
+    }
+
     function bindShortsControlVideo(video) {
         unbindShortsControlVideo();
         var state = shortsControls;
@@ -5043,7 +5120,8 @@
         state.listeners = [];
         state.cleanups = [
             setupBackgroundResume(video),
-            setupAutoPiP(video, false)
+            setupAutoPiP(video, false),
+            setupShortsWakeLock(video)
         ];
         function onMedia() {
             var player = findPlayer();

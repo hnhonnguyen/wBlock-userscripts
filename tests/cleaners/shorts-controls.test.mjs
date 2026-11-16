@@ -19,6 +19,28 @@ try {
       }
     } catch (e) { /* ignore */ }
   });
+  await context.addInitScript(() => {
+    try {
+      window.__wakeRequests = 0;
+      window.__wakeReleases = 0;
+      const wakeLock = {
+        request: () => {
+          window.__wakeRequests++;
+          const sentinel = new EventTarget();
+          sentinel.released = false;
+          sentinel.release = () => {
+            if (sentinel.released) return Promise.resolve();
+            sentinel.released = true;
+            window.__wakeReleases++;
+            sentinel.dispatchEvent(new Event('release'));
+            return Promise.resolve();
+          };
+          return Promise.resolve(sentinel);
+        }
+      };
+      Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: wakeLock });
+    } catch (e) { /* ignore */ }
+  });
   await context.addInitScript(script);
   const page = await context.newPage();
   const errors = [];
@@ -61,6 +83,29 @@ try {
   assert.equal(s.current, 'hd1080');
   assert.equal(s.rate, 1.5);
   console.log('PASS: Shorts applies the saved quality and speed through the media APIs');
+
+  await page.evaluate(() => {
+    const video = document.querySelector('#movie_player video');
+    Object.defineProperty(video, 'paused', { configurable: true, value: false });
+    Object.defineProperty(video, 'ended', { configurable: true, value: false });
+    video.dispatchEvent(new Event('play'));
+  });
+  await page.waitForTimeout(400);
+  let wake = await page.evaluate(() => ({
+    requests: window.__wakeRequests, releases: window.__wakeReleases
+  }));
+  assert.ok(wake.requests >= 1, 'playing a Short acquires a screen wake lock');
+  await page.evaluate(() => {
+    const video = document.querySelector('#movie_player video');
+    Object.defineProperty(video, 'paused', { configurable: true, value: true });
+    video.dispatchEvent(new Event('pause'));
+  });
+  await page.waitForTimeout(200);
+  wake = await page.evaluate(() => ({
+    requests: window.__wakeRequests, releases: window.__wakeReleases
+  }));
+  assert.ok(wake.releases >= 1, 'pausing releases the screen wake lock');
+  console.log('PASS: Shorts holds a screen wake lock only while playing');
 
   await page.locator('.wblock-tc-shorts-quality-button').click();
   const qualityOptions = await page.locator('.wblock-tc-shorts-quality-menu > button').allTextContents();
