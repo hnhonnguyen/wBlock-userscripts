@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Tube Cleaner Plus
 // @namespace    com.skula.wblock
-// @version      0.4.2
-// @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection, audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
+// @version      0.4.3
+// @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection (including Shorts), audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
 // @description:de  Bietet YouTube native Safari-Steuerelemente, Kapitel, Untertitel, SponsorBlock, Bild-in-Bild, Hintergrundwiedergabe, Qualitätsauswahl und einen Nur-Audio-Modus.
 // @description:es  Añade a YouTube controles nativos de Safari, capítulos, subtítulos, SponsorBlock, imagen en imagen, reproducción en segundo plano, selección de calidad y modo de solo audio.
 // @description:fr  Ajoute à YouTube les commandes natives de Safari, les chapitres, les sous-titres, SponsorBlock, l’image dans l’image, la lecture en arrière-plan, le choix de qualité et le mode audio seul.
@@ -74,7 +74,7 @@
     // ------------------------------------------------------------------
 
     var LOG_PREFIX = '[Tube Cleaner]';
-    var SCRIPT_VERSION = '0.4.2';
+    var SCRIPT_VERSION = '0.4.3';
     var STORAGE_AUDIO = 'wblock.tubeCleaner.audioOnly';
     var STORAGE_QUALITY = 'wblock.tubeCleaner.quality';
     var STORAGE_TOOLBAR_HIDDEN = 'wblock.tubeCleaner.hideToolbar';
@@ -343,6 +343,10 @@
         var value = isFinite(rate) ? Math.round(Math.min(16, Math.max(0.25, rate)) * 100) / 100 : 1;
         storageSet(STORAGE_SPEED, String(value));
         return value;
+    }
+
+    function formatSpeed(rate) {
+        return String(Math.round(rate * 100) / 100) + 'x';
     }
 
     function isAutoNextEnabled() {
@@ -4148,6 +4152,7 @@
         // document observer injects it pre-paint), so re-disable it cheaply
         // on every call.
         setStylesSuspended(true);
+        setupShortsControls();
         if (shortsSuspensionComplete) return;
         shortsSuspensionComplete = true;
         if (playerObserver) {
@@ -4194,6 +4199,7 @@
             suspendForShorts();
             return;
         }
+        teardownShortsControls();
         setStylesSuspended(false);
         shortsSuspensionComplete = false;
 
@@ -4359,6 +4365,70 @@
         if (h >= 330) return 'medium';
         if (h >= 210) return 'small';
         return 'tiny';
+    }
+
+    function dropdownMenuStyleCss() {
+        var menuFont = IS_IOS ? '16px' : '12px';
+        var menuPadding = IS_IOS ? '8px 0' : '4px 0';
+        var menuMinWidth = IS_IOS ? '140px' : '100px';
+        return 'position:absolute;bottom:100%;right:0;margin-bottom:4px;box-sizing:border-box;' +
+            'background:rgba(0,0,0,0.92);border-radius:5px;padding:' + menuPadding + ';min-width:' +
+            menuMinWidth + ';max-height:60vh;overflow-y:auto;-webkit-overflow-scrolling:touch;' +
+            'display:none;z-index:70;font:' + menuFont + '/1.8 -apple-system,system-ui,sans-serif';
+    }
+
+    function dropdownItemStyle() {
+        return 'display:block;width:100%;border:0;background:transparent;font:inherit;line-height:inherit;' +
+            'text-align:left;padding:' + (IS_IOS ? '10px 16px' : '4px 12px') + ';cursor:pointer;color:#fff;' +
+            'white-space:nowrap;-webkit-appearance:none;appearance:none;touch-action:manipulation';
+    }
+
+    function buildQualityChoices(menu, preferred, onChoose) {
+        while (menu.firstChild) {
+            menu.removeChild(menu.firstChild);
+        }
+        var itemStyle = dropdownItemStyle();
+        function addChoice(value, label) {
+            var item = document.createElement('button');
+            item.type = 'button';
+            item.style.cssText = itemStyle;
+            item.textContent = label;
+            if (preferred === value) item.style.color = '#4fc3f7';
+            item.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                onChoose(value);
+            });
+            menu.appendChild(item);
+        }
+        addChoice('auto', 'Auto');
+        var levels = qualityMenuLevels();
+        for (var i = 0; i < levels.length; i++) {
+            addChoice(levels[i], QUALITY_LABELS[levels[i]] || levels[i]);
+        }
+    }
+
+    function buildSpeedChoices(menu, current, onChoose) {
+        while (menu.firstChild) {
+            menu.removeChild(menu.firstChild);
+        }
+        var itemStyle = dropdownItemStyle();
+        for (var i = 0; i < PLAYBACK_SPEEDS.length; i++) {
+            var rate = PLAYBACK_SPEEDS[i];
+            var item = document.createElement('button');
+            item.type = 'button';
+            item.style.cssText = itemStyle;
+            item.textContent = formatSpeed(rate);
+            if (Math.abs(rate - current) <= 0.001) item.style.color = '#4fc3f7';
+            item.addEventListener('click', (function (value) {
+                return function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onChoose(value);
+                };
+            })(rate));
+            menu.appendChild(item);
+        }
     }
 
     // Click YouTube's internal settings button to open the quality menu
@@ -4672,6 +4742,341 @@
         catch (e) { /* ignore */ }
     }
 
+    // Shorts on mobile web has no settings or quality menu of its own, and the
+    // player starts around 360p. Keep the reel player stock, but expose
+    // quality, speed, and PiP pills and enable background playback through the
+    // player and media APIs.
+    var shortsControls = null;
+
+    function shortsPillStyle() {
+        return 'background:rgba(0,0,0,0.72);color:#fff;border:none;border-radius:8px;' +
+            'padding:7px 10px;min-height:34px;font:13px/1.2 -apple-system,system-ui,sans-serif;' +
+            'cursor:pointer;-webkit-user-select:none;user-select:none;touch-action:manipulation;' +
+            'box-shadow:0 0 0 1px rgba(255,255,255,0.18)';
+    }
+
+    function shortsPillBarStyle() {
+        return 'position:fixed;z-index:2147483000;top:calc(env(safe-area-inset-top, 0px) + 56px);' +
+            'right:max(8px, env(safe-area-inset-right, 0px));display:flex;gap:6px;align-items:center;';
+    }
+
+    function clampShortsQuality(target) {
+        if (target === 'auto') return target;
+        var levels = qualityMenuLevels();
+        if (levels.indexOf(target) !== -1) return target;
+        var targetIdx = QUALITY_ORDER.indexOf(target);
+        for (var i = targetIdx + 1; i < QUALITY_ORDER.length; i++) {
+            if (levels.indexOf(QUALITY_ORDER[i]) !== -1) return QUALITY_ORDER[i];
+        }
+        return target;
+    }
+
+    function applyShortsQuality(target) {
+        var player = findPlayer();
+        if (!player) return false;
+        target = clampShortsQuality(target);
+        try {
+            if (typeof player.setPlaybackQualityRange === 'function') {
+                if (target === 'auto') player.setPlaybackQualityRange('auto', 'auto');
+                else player.setPlaybackQualityRange(target, target);
+                return true;
+            }
+            if (typeof player.setPlaybackQuality === 'function') {
+                player.setPlaybackQuality(target);
+                return true;
+            }
+        } catch (e) {
+            log('Shorts quality apply failed', e);
+        }
+        return false;
+    }
+
+    function applyShortsSpeed(player, video) {
+        if (!featureEnabled('playbackSpeed')) return;
+        // Do not force 1x: a speed chosen from YouTube's own Shorts menu must
+        // survive until the saved preference asks for something else.
+        applyPlaybackSpeed(player, video);
+    }
+
+    function updateShortsQualityBtn() {
+        var state = shortsControls;
+        if (!state || !state.qualityBtn) return;
+        var preferred = getPreferredQuality();
+        var current = getCurrentQuality();
+        if (current === 'auto' || current === 'unknown' || !QUALITY_LABELS[current]) {
+            var mapped = qualityFromVideoHeight(state.video);
+            if (mapped) current = mapped;
+        }
+        if (!QUALITY_LABELS[current]) current = preferred;
+        var currentLabel = QUALITY_LABELS[current] || current;
+        var text = preferred === 'auto'
+            ? (current === 'auto' ? 'Auto' : 'Auto (' + currentLabel + ')')
+            : currentLabel;
+        state.qualityBtn.textContent = text;
+        state.qualityBtn.setAttribute('aria-label', 'Video quality: ' + text);
+        state.qualityBtn.title = 'Video quality (saved for every video)';
+    }
+
+    function updateShortsSpeedBtn() {
+        var state = shortsControls;
+        if (!state || !state.speedBtn) return;
+        var text = formatSpeed(getPreferredSpeed());
+        state.speedBtn.textContent = text;
+        state.speedBtn.setAttribute('aria-label', 'Playback speed: ' + text);
+        state.speedBtn.title = 'Playback speed (saved for every video)';
+    }
+
+    function shortsPiPSupported(video) {
+        return !!video && (supportsWebkitPiP(video) ||
+            (typeof video.requestPictureInPicture === 'function' &&
+                document.pictureInPictureEnabled !== false));
+    }
+
+    function updateShortsPipBtn() {
+        var state = shortsControls;
+        if (!state || !state.pipBtn) return;
+        var supported = shortsPiPSupported(state.video);
+        state.pipBtn.style.display = supported ? '' : 'none';
+        if (!supported) return;
+        var active = isPiPActive(state.video);
+        state.pipBtn.style.color = active ? '#4fc3f7' : '#fff';
+        state.pipBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        state.pipBtn.title = active ? 'Exit picture in picture' : 'Picture in picture';
+    }
+
+    function unbindShortsControlVideo() {
+        var state = shortsControls;
+        if (!state) return;
+        if (state.cleanups) {
+            for (var c = 0; c < state.cleanups.length; c++) {
+                try { state.cleanups[c](); } catch (e) { /* ignore */ }
+            }
+        }
+        state.cleanups = [];
+        if (state.video && state.listeners) {
+            for (var i = 0; i < state.listeners.length; i++) {
+                try { state.video.removeEventListener(state.listeners[i][0], state.listeners[i][1]); }
+                catch (e) { /* ignore */ }
+            }
+        }
+        state.listeners = [];
+        state.video = null;
+    }
+
+    function bindShortsControlVideo(video) {
+        unbindShortsControlVideo();
+        var state = shortsControls;
+        if (!state) return;
+        state.video = video;
+        state.listeners = [];
+        state.cleanups = [
+            setupBackgroundResume(video),
+            setupAutoPiP(video, false)
+        ];
+        function onMedia() {
+            var player = findPlayer();
+            var current = player && player.querySelector('video');
+            if (current) applyShortsSpeed(player, current);
+            state.appliedKey = '';
+            syncShortsControls();
+        }
+        var events = ['loadedmetadata', 'durationchange', 'play', 'playing'];
+        for (var i = 0; i < events.length; i++) {
+            video.addEventListener(events[i], onMedia);
+            state.listeners.push([events[i], onMedia]);
+        }
+        function onResize() { updateShortsQualityBtn(); }
+        video.addEventListener('resize', onResize);
+        state.listeners.push(['resize', onResize]);
+        function onPipChange() { updateShortsPipBtn(); }
+        ['webkitpresentationmodechanged', 'enterpictureinpicture', 'leavepictureinpicture'].forEach(function (type) {
+            video.addEventListener(type, onPipChange);
+            state.listeners.push([type, onPipChange]);
+        });
+        updateShortsPipBtn();
+    }
+
+    function ensureShortsControlsUI() {
+        var state = shortsControls;
+        if (!state || state.bar || !document.body || !featureEnabled('toolbar')) return;
+        var bar = document.createElement('div');
+        bar.className = 'wblock-tc-shorts-controls';
+        bar.style.cssText = shortsPillBarStyle();
+
+        var pipBtn = null;
+        if (featureEnabled('pictureInPicture')) {
+            pipBtn = document.createElement('button');
+            pipBtn.className = 'wblock-tc-shorts-pip-button';
+            pipBtn.type = 'button';
+            pipBtn.style.cssText = shortsPillStyle();
+            pipBtn.textContent = 'PiP';
+            pipBtn.style.display = 'none';
+            bar.appendChild(pipBtn);
+            pipBtn.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var player = findPlayer();
+                var video = player && player.querySelector('video');
+                if (!video) return;
+                if (isPiPActive(video)) leavePiP(video);
+                else requestPiP(video, function () { updateShortsPipBtn(); });
+                updateShortsPipBtn();
+            });
+        }
+
+        var speedBtn = null;
+        var speedMenu = null;
+        if (featureEnabled('playbackSpeed')) {
+            speedBtn = document.createElement('button');
+            speedBtn.className = 'wblock-tc-shorts-speed-button';
+            speedBtn.type = 'button';
+            speedBtn.style.cssText = shortsPillStyle();
+            speedMenu = document.createElement('div');
+            speedMenu.className = 'wblock-tc-speed-menu wblock-tc-shorts-speed-menu';
+            speedMenu.style.cssText = dropdownMenuStyleCss();
+            bar.appendChild(speedBtn);
+            document.body.appendChild(speedMenu);
+        }
+
+        var qualityBtn = document.createElement('button');
+        qualityBtn.className = 'wblock-tc-shorts-quality-button';
+        qualityBtn.type = 'button';
+        qualityBtn.style.cssText = shortsPillStyle();
+        var qualityMenu = document.createElement('div');
+        qualityMenu.className = 'wblock-tc-quality-menu wblock-tc-shorts-quality-menu';
+        qualityMenu.style.cssText = dropdownMenuStyleCss();
+        bar.appendChild(qualityBtn);
+        document.body.appendChild(qualityMenu);
+
+        function closeSpeedMenu() {
+            if (speedMenu) speedMenu.style.display = 'none';
+        }
+        function closeQualityMenu() {
+            qualityMenu.style.display = 'none';
+        }
+        function onDocumentClick(e) {
+            var insideSpeed = speedMenu &&
+                (speedMenu.contains(e.target) || (speedBtn && speedBtn.contains(e.target)));
+            var insideQuality = qualityMenu.contains(e.target) || qualityBtn.contains(e.target);
+            if (!insideSpeed) closeSpeedMenu();
+            if (!insideQuality) closeQualityMenu();
+        }
+
+        if (speedBtn) {
+            speedBtn.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                closeQualityMenu();
+                if (speedMenu.style.display === 'none') {
+                    buildSpeedChoices(speedMenu, getPreferredSpeed(), function (rate) {
+                        setPreferredSpeed(rate);
+                        var player = findPlayer();
+                        var video = player && player.querySelector('video');
+                        if (video && featureEnabled('playbackSpeed')) {
+                            applyPlaybackSpeed(player, video, true);
+                        }
+                        updateShortsSpeedBtn();
+                        closeSpeedMenu();
+                    });
+                    showMobilePageOverlay(speedMenu, speedBtn, 520, 4);
+                    speedMenu.style.display = 'block';
+                } else {
+                    closeSpeedMenu();
+                }
+            });
+        }
+
+        qualityBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            closeSpeedMenu();
+            if (qualityMenu.style.display === 'none') {
+                buildQualityChoices(qualityMenu, getPreferredQuality(), function (q) {
+                    setPreferredQuality(q);
+                    state.appliedKey = '';
+                    applyShortsQuality(q);
+                    updateShortsQualityBtn();
+                    closeQualityMenu();
+                });
+                showMobilePageOverlay(qualityMenu, qualityBtn, 420, 4);
+                qualityMenu.style.display = 'block';
+            } else {
+                closeQualityMenu();
+            }
+        });
+
+        document.addEventListener('click', onDocumentClick, true);
+        document.body.appendChild(bar);
+        state.bar = bar;
+        state.pipBtn = pipBtn;
+        state.speedBtn = speedBtn;
+        state.speedMenu = speedMenu;
+        state.qualityBtn = qualityBtn;
+        state.qualityMenu = qualityMenu;
+        state.onDocumentClick = onDocumentClick;
+        updateShortsPipBtn();
+        updateShortsSpeedBtn();
+        updateShortsQualityBtn();
+    }
+
+    function syncShortsControls() {
+        var state = shortsControls;
+        if (!state) return;
+        if (!isShortsPath()) {
+            teardownShortsControls();
+            return;
+        }
+        ensureShortsControlsUI();
+        var player = findPlayer();
+        var video = player && player.querySelector('video');
+        if (video && video !== state.video) {
+            bindShortsControlVideo(video);
+            applyShortsSpeed(player, video);
+        }
+        if (!video) {
+            updateShortsQualityBtn();
+            updateShortsSpeedBtn();
+            updateShortsPipBtn();
+            return;
+        }
+        var target = getPreferredQuality();
+        var key = (youtubeVideoIdentity(player) || '') + '|' + target;
+        if (state.appliedKey !== key && video.readyState >= 1) {
+            if (applyShortsQuality(target)) state.appliedKey = key;
+        }
+        updateShortsQualityBtn();
+        updateShortsSpeedBtn();
+        updateShortsPipBtn();
+    }
+
+    function setupShortsControls() {
+        if (!IS_IOS || shortsControls) return;
+        if (featureEnabled('backgroundPlayback')) enableBackgroundPlayback();
+        shortsControls = {
+            timer: null, bar: null, video: null, listeners: [], cleanups: [], appliedKey: '',
+            pipBtn: null, speedBtn: null, speedMenu: null, qualityBtn: null, qualityMenu: null
+        };
+        shortsControls.timer = setInterval(syncShortsControls, 1000);
+        syncShortsControls();
+    }
+
+    function teardownShortsControls() {
+        var state = shortsControls;
+        if (!state) return;
+        if (state.timer !== null) clearInterval(state.timer);
+        unbindShortsControlVideo();
+        if (state.onDocumentClick) {
+            document.removeEventListener('click', state.onDocumentClick, true);
+        }
+        [state.speedMenu, state.qualityMenu].forEach(function (menu) {
+            if (!menu) return;
+            removeMobilePageOverlay(menu);
+            if (menu.parentNode) menu.remove();
+        });
+        if (state.bar && state.bar.parentNode) state.bar.remove();
+        shortsControls = null;
+    }
+
     // ------------------------------------------------------------------
     // Toolbar overlay (playback controls and SponsorBlock settings)
     // ------------------------------------------------------------------
@@ -4920,66 +5325,15 @@
         // Quality dropdown — opens away from the toolbar edge.
         var qualityMenu = document.createElement('div');
         qualityMenu.className = 'wblock-tc-quality-menu';
-        var menuFont = IS_IOS ? '16px' : '12px';
-        var menuPadding = IS_IOS ? '8px 0' : '4px 0';
-        var menuMinWidth = IS_IOS ? '140px' : '100px';
-        var qualityMenuAnchor = 'bottom:100%;right:0;margin-bottom:4px;';
-        qualityMenu.style.cssText = 'position:absolute;' + qualityMenuAnchor + 'box-sizing:border-box;background:rgba(0,0,0,0.92);border-radius:5px;padding:' + menuPadding + ';min-width:' + menuMinWidth + ';max-height:60vh;overflow-y:auto;-webkit-overflow-scrolling:touch;display:none;z-index:70;font:' + menuFont + '/1.8 -apple-system,system-ui,sans-serif';
+        qualityMenu.style.cssText = dropdownMenuStyleCss();
 
         function buildQualityMenu() {
-            // Clear safely — avoid innerHTML which triggers TrustedHTML CSP
-            while (qualityMenu.firstChild) {
-                qualityMenu.removeChild(qualityMenu.firstChild);
-            }
-            var levels = qualityMenuLevels();
-            var preferred = getPreferredQuality();
-
-            var itemPadding = IS_IOS ? '10px 16px' : '4px 12px';
-            // Use real buttons rather than clickable divs. In iOS Safari, a
-            // video layer can make synthetic click targets unreliable, while
-            // buttons retain their touch activation semantics above the player.
-            var itemStyle = 'display:block;width:100%;border:0;background:transparent;font:inherit;line-height:inherit;text-align:left;padding:' +
-                itemPadding + ';cursor:pointer;color:#fff;white-space:nowrap;-webkit-appearance:none;appearance:none;touch-action:manipulation';
-
-            // Auto option
-            var autoItem = document.createElement('button');
-            autoItem.type = 'button';
-            autoItem.style.cssText = itemStyle;
-            autoItem.textContent = 'Auto';
-            if (preferred === 'auto') {
-                autoItem.style.color = '#4fc3f7';
-            }
-            autoItem.addEventListener('click', function (e) {
-                e.preventDefault();
-                e.stopPropagation();
-                setPreferredQuality('auto');
-                setQuality('auto');
+            buildQualityChoices(qualityMenu, getPreferredQuality(), function (q) {
+                setPreferredQuality(q);
+                setQuality(q);
                 updateQualityBtn();
                 qualityMenu.style.display = 'none';
             });
-            qualityMenu.appendChild(autoItem);
-
-            // Available quality levels
-            for (var i = 0; i < levels.length; i++) {
-                (function (q) {
-                    var item = document.createElement('button');
-                    item.type = 'button';
-                    item.style.cssText = itemStyle;
-                    item.textContent = QUALITY_LABELS[q] || q;
-                    if (preferred === q) {
-                        item.style.color = '#4fc3f7';
-                    }
-                    item.addEventListener('click', function (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setPreferredQuality(q);
-                        setQuality(q);
-                        updateQualityBtn();
-                        qualityMenu.style.display = 'none';
-                    });
-                    qualityMenu.appendChild(item);
-                })(levels[i]);
-            }
         }
 
         qualityBtn.addEventListener('click', function (e) {
@@ -5339,15 +5693,8 @@
         speedBtn.style.cssText = btnStyle;
         var speedMenu = document.createElement('div');
         speedMenu.className = 'wblock-tc-speed-menu';
-        speedMenu.style.cssText = 'position:absolute;bottom:100%;right:0;margin-bottom:4px;box-sizing:border-box;' +
-            'background:rgba(0,0,0,0.92);border-radius:5px;padding:' + (IS_IOS ? '8px 0' : '4px 0') + ';' +
-            'min-width:' + (IS_IOS ? '140px' : '100px') + ';max-height:60vh;overflow-y:auto;' +
-            '-webkit-overflow-scrolling:touch;display:none;z-index:70;font:' + (IS_IOS ? '16px' : '12px') +
-            '/1.8 -apple-system,system-ui,sans-serif';
+        speedMenu.style.cssText = dropdownMenuStyleCss();
 
-        function formatSpeed(rate) {
-            return String(Math.round(rate * 100) / 100) + 'x';
-        }
         function updateSpeedBtn() {
             speedBtn.textContent = formatSpeed(getPreferredSpeed());
             speedBtn.title = 'Playback speed (saved for every video)';
@@ -5355,26 +5702,11 @@
         updateSpeedBtn();
 
         function buildSpeedMenu() {
-            while (speedMenu.firstChild) speedMenu.removeChild(speedMenu.firstChild);
-            var itemStyle = 'display:block;width:100%;border:0;background:transparent;font:inherit;line-height:inherit;' +
-                'text-align:left;padding:' + (IS_IOS ? '10px 16px' : '4px 12px') + ';cursor:pointer;color:#fff;' +
-                'white-space:nowrap;-webkit-appearance:none;appearance:none;touch-action:manipulation';
-            var current = getPreferredSpeed();
-            PLAYBACK_SPEEDS.forEach(function (rate) {
-                var item = document.createElement('button');
-                item.type = 'button';
-                item.style.cssText = itemStyle;
-                item.textContent = formatSpeed(rate);
-                if (Math.abs(rate - current) <= 0.001) item.style.color = '#4fc3f7';
-                item.addEventListener('click', function (e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setPreferredSpeed(rate);
-                    applyPlaybackSpeed(player, video, true);
-                    updateSpeedBtn();
-                    speedMenu.style.display = 'none';
-                });
-                speedMenu.appendChild(item);
+            buildSpeedChoices(speedMenu, getPreferredSpeed(), function (rate) {
+                setPreferredSpeed(rate);
+                applyPlaybackSpeed(player, video, true);
+                updateSpeedBtn();
+                speedMenu.style.display = 'none';
             });
         }
 
