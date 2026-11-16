@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Tube Cleaner Plus
 // @namespace    com.skula.wblock
-// @version      0.4.3
-// @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection (including Shorts), audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
+// @version      0.4.4
+// @description  Gives YouTube Safari-native controls, chapters, subtitles, SponsorBlock, picture-in-picture, background playback, quality selection (including Shorts), audio-track selection, audio-only mode, a saved default playback speed, auto-next, and previous/next video buttons.
 // @description:de  Bietet YouTube native Safari-Steuerelemente, Kapitel, Untertitel, SponsorBlock, Bild-in-Bild, Hintergrundwiedergabe, Qualitätsauswahl und einen Nur-Audio-Modus.
 // @description:es  Añade a YouTube controles nativos de Safari, capítulos, subtítulos, SponsorBlock, imagen en imagen, reproducción en segundo plano, selección de calidad y modo de solo audio.
 // @description:fr  Ajoute à YouTube les commandes natives de Safari, les chapitres, les sous-titres, SponsorBlock, l’image dans l’image, la lecture en arrière-plan, le choix de qualité et le mode audio seul.
@@ -74,8 +74,9 @@
     // ------------------------------------------------------------------
 
     var LOG_PREFIX = '[Tube Cleaner]';
-    var SCRIPT_VERSION = '0.4.3';
+    var SCRIPT_VERSION = '0.4.4';
     var STORAGE_AUDIO = 'wblock.tubeCleaner.audioOnly';
+    var STORAGE_AUDIO_TRACK = 'wblock.tubeCleaner.audioLanguage';
     var STORAGE_QUALITY = 'wblock.tubeCleaner.quality';
     var STORAGE_TOOLBAR_HIDDEN = 'wblock.tubeCleaner.hideToolbar';
     var STORAGE_SUBTITLES = 'wblock.tubeCleaner.subtitles';
@@ -347,6 +348,18 @@
 
     function formatSpeed(rate) {
         return String(Math.round(rate * 100) / 100) + 'x';
+    }
+
+    function getPreferredAudioLanguage() {
+        try { return localStorage.getItem(STORAGE_AUDIO_TRACK) || null; }
+        catch (e) { return null; }
+    }
+
+    function setPreferredAudioLanguage(language) {
+        try {
+            if (language) localStorage.setItem(STORAGE_AUDIO_TRACK, language);
+            else localStorage.removeItem(STORAGE_AUDIO_TRACK);
+        } catch (e) { /* ignore */ }
     }
 
     function isAutoNextEnabled() {
@@ -692,21 +705,26 @@
         '{ opacity: 0.9 !important; }',
 
         // Safari paints native <button> chrome light gray on hover. Keep the
-        // quality ladder and speed ladder on dark menus instead of the system
-        // control look.
+        // quality, speed, and audio-track ladders on dark menus instead of the
+        // system control look.
         '.wblock-tc-quality-menu,',
         '.wblock-tc-quality-menu button,',
         '.wblock-tc-speed-menu,',
-        '.wblock-tc-speed-menu button',
+        '.wblock-tc-speed-menu button,',
+        '.wblock-tc-audio-track-menu,',
+        '.wblock-tc-audio-track-menu button',
         '{ color-scheme: dark; -webkit-appearance: none; appearance: none; }',
         '.wblock-tc-quality-menu button,',
-        '.wblock-tc-speed-menu button',
+        '.wblock-tc-speed-menu button,',
+        '.wblock-tc-audio-track-menu button',
         '{ background: transparent !important; }',
         '.wblock-tc-quality-menu button:hover,',
-        '.wblock-tc-speed-menu button:hover',
+        '.wblock-tc-speed-menu button:hover,',
+        '.wblock-tc-audio-track-menu button:hover',
         '{ background: rgba(255,255,255,0.15) !important; }',
         '.wblock-tc-quality-menu button:focus,',
-        '.wblock-tc-speed-menu button:focus',
+        '.wblock-tc-speed-menu button:focus,',
+        '.wblock-tc-audio-track-menu button:focus',
         '{ outline: none; }',
 
         // YouTube reuses #movie_player for its floating miniplayer. Keep its
@@ -4431,6 +4449,144 @@
         }
     }
 
+    // YouTube's dubbed audio tracks live behind the player API. The native
+    // settings menu that exposes them is hidden by the cleaner, so the toolbar
+    // and Shorts controls read the same list and switch through setAudioTrack.
+    function audioTrackLanguageInfo(track) {
+        try {
+            if (track && typeof track.getLanguageInfo === 'function') {
+                return track.getLanguageInfo() || null;
+            }
+            return track && (track.rb || track.Ub) || null;
+        } catch (e) { return null; }
+    }
+
+    function audioTrackKey(info) {
+        var id = String(info && info.id || '').replace(/\.\d+$/, '').toLowerCase();
+        return id || String(info && info.name || '').toLowerCase();
+    }
+
+    function audioTrackShortLabel(info) {
+        var key = info && info.key ? info.key : audioTrackKey(info);
+        var primary = String(key || '').split('-')[0];
+        return primary ? primary.toUpperCase().slice(0, 3) : 'AUD';
+    }
+
+    function availableAudioTrackList(player) {
+        if (!player || typeof player.getAvailableAudioTracks !== 'function') return [];
+        var list = null;
+        try { list = player.getAvailableAudioTracks(); } catch (e) { return []; }
+        if (!list || !list.length) return [];
+        var entries = [];
+        for (var i = 0; i < list.length; i++) {
+            var info = audioTrackLanguageInfo(list[i]);
+            if (!info) continue;
+            entries.push({
+                track: list[i], name: info.name || info.id || 'Audio',
+                key: audioTrackKey(info), isDefault: !!info.isDefault,
+                auto: !!info.isAutoDubbed
+            });
+        }
+        entries.sort(function (a, b) {
+            if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+            return String(a.name).localeCompare(String(b.name));
+        });
+        return entries;
+    }
+
+    function currentAudioTrackEntry(player) {
+        if (!player || typeof player.getAudioTrack !== 'function') return null;
+        try {
+            var track = player.getAudioTrack();
+            var info = audioTrackLanguageInfo(track);
+            if (!info) return null;
+            return {
+                track: track, name: info.name || info.id || 'Audio',
+                key: audioTrackKey(info), isDefault: !!info.isDefault,
+                auto: !!info.isAutoDubbed
+            };
+        } catch (e) { return null; }
+    }
+
+    function findAudioTrackEntry(entries, preferred) {
+        if (!preferred) return null;
+        var key = String(preferred).toLowerCase();
+        var primary = key.split('-')[0];
+        var i;
+        for (i = 0; i < entries.length; i++) if (entries[i].key === key) return entries[i];
+        for (i = 0; i < entries.length; i++) {
+            if (entries[i].key.split('-')[0] === primary) return entries[i];
+        }
+        return null;
+    }
+
+    function defaultAudioTrackEntry(entries) {
+        for (var i = 0; i < entries.length; i++) if (entries[i].isDefault) return entries[i];
+        return entries.length ? entries[0] : null;
+    }
+
+    function switchAudioTrack(player, entry) {
+        if (!player || !entry || !entry.track || typeof player.setAudioTrack !== 'function') return false;
+        try {
+            player.setAudioTrack(entry.track);
+            return true;
+        } catch (e) {
+            log('audio track switch failed', e);
+            return false;
+        }
+    }
+
+    function syncPreferredAudioTrack(player, state) {
+        var preferred = getPreferredAudioLanguage();
+        if (!preferred) {
+            state.tried = '';
+            return;
+        }
+        var entries = availableAudioTrackList(player);
+        if (entries.length < 2) return;
+        var current = currentAudioTrackEntry(player);
+        if (current && current.key === preferred) {
+            state.tried = '';
+            return;
+        }
+        var entry = findAudioTrackEntry(entries, preferred);
+        if (!entry) return;
+        var identity = youtubeVideoIdentity(player) || '';
+        var key = identity + '|' + preferred;
+        if (state.tried === key) return;
+        state.tried = key;
+        switchAudioTrack(player, entry);
+    }
+
+    function buildAudioTrackChoices(menu, player, onChoose) {
+        while (menu.firstChild) {
+            menu.removeChild(menu.firstChild);
+        }
+        var itemStyle = dropdownItemStyle();
+        var preferred = getPreferredAudioLanguage();
+        var current = currentAudioTrackEntry(player);
+        var entries = availableAudioTrackList(player);
+        function add(value, label, selected) {
+            var item = document.createElement('button');
+            item.type = 'button';
+            item.style.cssText = itemStyle;
+            item.textContent = label;
+            if (selected) item.style.color = '#4fc3f7';
+            item.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                onChoose(value);
+            });
+            menu.appendChild(item);
+        }
+        add(null, 'Auto', !preferred);
+        for (var i = 0; i < entries.length; i++) {
+            var entry = entries[i];
+            add(entry, entry.name + (entry.auto ? ' (auto)' : ''),
+                !!(current && current.key === entry.key));
+        }
+    }
+
     // Click YouTube's internal settings button to open the quality menu
     function openSettingsMenu(player) {
         var settingsBtn = player.querySelector('.ytp-settings-button') ||
@@ -4826,6 +4982,22 @@
         state.speedBtn.title = 'Playback speed (saved for every video)';
     }
 
+    function updateShortsAudioBtn() {
+        var state = shortsControls;
+        if (!state || !state.audioBtn) return;
+        var player = findPlayer();
+        var entries = availableAudioTrackList(player);
+        state.audioBtn.style.display = entries.length > 1 ? '' : 'none';
+        if (entries.length < 2) return;
+        syncPreferredAudioTrack(player, state.audioState);
+        var current = currentAudioTrackEntry(player);
+        var label = current ? audioTrackShortLabel(current) : 'AUD';
+        var name = current ? current.name : 'Default';
+        state.audioBtn.textContent = label;
+        state.audioBtn.setAttribute('aria-label', 'Audio track: ' + name);
+        state.audioBtn.title = 'Audio track: ' + name;
+    }
+
     function shortsPiPSupported(video) {
         return !!video && (supportsWebkitPiP(video) ||
             (typeof video.requestPictureInPicture === 'function' &&
@@ -4903,6 +5075,17 @@
         bar.className = 'wblock-tc-shorts-controls';
         bar.style.cssText = shortsPillBarStyle();
 
+        var audioBtn = document.createElement('button');
+        audioBtn.className = 'wblock-tc-shorts-audio-button';
+        audioBtn.type = 'button';
+        audioBtn.style.cssText = shortsPillStyle();
+        audioBtn.style.display = 'none';
+        var audioMenu = document.createElement('div');
+        audioMenu.className = 'wblock-tc-audio-track-menu wblock-tc-shorts-audio-menu';
+        audioMenu.style.cssText = dropdownMenuStyleCss();
+        bar.appendChild(audioBtn);
+        document.body.appendChild(audioMenu);
+
         var pipBtn = null;
         if (featureEnabled('pictureInPicture')) {
             pipBtn = document.createElement('button');
@@ -4954,12 +5137,17 @@
         function closeQualityMenu() {
             qualityMenu.style.display = 'none';
         }
+        function closeAudioMenu() {
+            audioMenu.style.display = 'none';
+        }
         function onDocumentClick(e) {
             var insideSpeed = speedMenu &&
                 (speedMenu.contains(e.target) || (speedBtn && speedBtn.contains(e.target)));
             var insideQuality = qualityMenu.contains(e.target) || qualityBtn.contains(e.target);
+            var insideAudio = audioMenu.contains(e.target) || audioBtn.contains(e.target);
             if (!insideSpeed) closeSpeedMenu();
             if (!insideQuality) closeQualityMenu();
+            if (!insideAudio) closeAudioMenu();
         }
 
         if (speedBtn) {
@@ -4967,6 +5155,7 @@
                 e.preventDefault();
                 e.stopPropagation();
                 closeQualityMenu();
+                closeAudioMenu();
                 if (speedMenu.style.display === 'none') {
                     buildSpeedChoices(speedMenu, getPreferredSpeed(), function (rate) {
                         setPreferredSpeed(rate);
@@ -4990,6 +5179,7 @@
             e.preventDefault();
             e.stopPropagation();
             closeSpeedMenu();
+            closeAudioMenu();
             if (qualityMenu.style.display === 'none') {
                 buildQualityChoices(qualityMenu, getPreferredQuality(), function (q) {
                     setPreferredQuality(q);
@@ -5005,15 +5195,46 @@
             }
         });
 
+        audioBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            closeSpeedMenu();
+            closeQualityMenu();
+            var player = findPlayer();
+            if (audioMenu.style.display === 'none') {
+                buildAudioTrackChoices(audioMenu, player, function (entry) {
+                    if (entry) {
+                        setPreferredAudioLanguage(entry.key);
+                        switchAudioTrack(player, entry);
+                    } else {
+                        setPreferredAudioLanguage(null);
+                        var fallback = defaultAudioTrackEntry(availableAudioTrackList(player));
+                        if (fallback) switchAudioTrack(player, fallback);
+                    }
+                    state.audioState.tried = '';
+                    updateShortsAudioBtn();
+                    closeAudioMenu();
+                });
+                showMobilePageOverlay(audioMenu, audioBtn, 520, 4);
+                audioMenu.style.display = 'block';
+                fitMobilePageOverlay(audioMenu);
+            } else {
+                closeAudioMenu();
+            }
+        });
+
         document.addEventListener('click', onDocumentClick, true);
         document.body.appendChild(bar);
         state.bar = bar;
+        state.audioBtn = audioBtn;
+        state.audioMenu = audioMenu;
         state.pipBtn = pipBtn;
         state.speedBtn = speedBtn;
         state.speedMenu = speedMenu;
         state.qualityBtn = qualityBtn;
         state.qualityMenu = qualityMenu;
         state.onDocumentClick = onDocumentClick;
+        updateShortsAudioBtn();
         updateShortsPipBtn();
         updateShortsSpeedBtn();
         updateShortsQualityBtn();
@@ -5034,6 +5255,7 @@
             applyShortsSpeed(player, video);
         }
         if (!video) {
+            updateShortsAudioBtn();
             updateShortsQualityBtn();
             updateShortsSpeedBtn();
             updateShortsPipBtn();
@@ -5044,6 +5266,7 @@
         if (state.appliedKey !== key && video.readyState >= 1) {
             if (applyShortsQuality(target)) state.appliedKey = key;
         }
+        updateShortsAudioBtn();
         updateShortsQualityBtn();
         updateShortsSpeedBtn();
         updateShortsPipBtn();
@@ -5054,6 +5277,7 @@
         if (featureEnabled('backgroundPlayback')) enableBackgroundPlayback();
         shortsControls = {
             timer: null, bar: null, video: null, listeners: [], cleanups: [], appliedKey: '',
+            audioBtn: null, audioMenu: null, audioState: { tried: '' },
             pipBtn: null, speedBtn: null, speedMenu: null, qualityBtn: null, qualityMenu: null
         };
         shortsControls.timer = setInterval(syncShortsControls, 1000);
@@ -5068,7 +5292,7 @@
         if (state.onDocumentClick) {
             document.removeEventListener('click', state.onDocumentClick, true);
         }
-        [state.speedMenu, state.qualityMenu].forEach(function (menu) {
+        [state.speedMenu, state.qualityMenu, state.audioMenu].forEach(function (menu) {
             if (!menu) return;
             removeMobilePageOverlay(menu);
             if (menu.parentNode) menu.remove();
@@ -5115,6 +5339,18 @@
 
     function removeMobilePageOverlay(menu) {
         if (IS_IOS && menu && menu.parentNode === document.body) { menu.remove(); }
+    }
+
+    // A right-aligned menu anchored to a middle pill can grow past the left
+    // edge when its labels are long (audio track names). Nudge it back on
+    // screen after it has a measured width.
+    function fitMobilePageOverlay(menu) {
+        if (!IS_IOS || !menu) return;
+        var rect = menu.getBoundingClientRect();
+        var right = parseFloat(menu.style.right) || 0;
+        if (rect.left < 8) {
+            menu.style.right = Math.max(8, right - (8 - rect.left)) + 'px';
+        }
     }
 
     function toolbarBoxStyle() {
@@ -5343,6 +5579,7 @@
                 if (sponsorBtn) sponsorBtn.setAttribute('aria-expanded', 'false');
             }
             speedMenu.style.display = 'none';
+            audioTrackMenu.style.display = 'none';
             if (qualityMenu.style.display === 'none') {
                 buildQualityMenu();
                 if (IS_IOS) {
@@ -5402,10 +5639,85 @@
         playbackRow.appendChild(liveBtn);
         playbackRow.appendChild(qualityWrap);
 
-        // Update the quality and live labels periodically. Store the timer on
-        // the toolbar so it can be cleared when the toolbar is rebuilt (avoids
-        // a leak across video-element re-creation).
-        toolbar._wblockQualityTimer = setInterval(function () { updateQualityBtn(); updateLiveBtn(); if (!IS_IOS) updateTheaterBtn(); }, 2000);
+        // Audio track (dubbed language). YouTube's own picker is inside the
+        // settings menu the cleaner hides, so expose the same list here.
+        var audioTrackWrap = document.createElement('div');
+        audioTrackWrap.style.cssText = 'position:relative;display:none';
+        var audioTrackBtn = document.createElement('button');
+        audioTrackBtn.className = 'wblock-tc-audio-track-button';
+        audioTrackBtn.type = 'button';
+        audioTrackBtn.style.cssText = btnStyle;
+        var audioTrackMenu = document.createElement('div');
+        audioTrackMenu.className = 'wblock-tc-audio-track-menu';
+        audioTrackMenu.style.cssText = dropdownMenuStyleCss();
+        var audioTrackState = { tried: '' };
+
+        function updateAudioTrackBtn() {
+            var entries = availableAudioTrackList(player);
+            audioTrackWrap.style.display = entries.length > 1 ? '' : 'none';
+            if (entries.length < 2) return;
+            syncPreferredAudioTrack(player, audioTrackState);
+            var current = currentAudioTrackEntry(player);
+            var label = current ? audioTrackShortLabel(current) : 'AUD';
+            var name = current ? current.name : 'Default';
+            audioTrackBtn.textContent = label;
+            audioTrackBtn.title = 'Audio track: ' + name;
+            audioTrackBtn.setAttribute('aria-label', 'Audio track: ' + name);
+        }
+
+        function chooseAudioTrack(entry) {
+            if (entry) {
+                setPreferredAudioLanguage(entry.key);
+                switchAudioTrack(player, entry);
+            } else {
+                setPreferredAudioLanguage(null);
+                var fallback = defaultAudioTrackEntry(availableAudioTrackList(player));
+                if (fallback) switchAudioTrack(player, fallback);
+            }
+            audioTrackState.tried = '';
+            audioTrackMenu.style.display = 'none';
+            updateAudioTrackBtn();
+        }
+
+        audioTrackBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            qualityMenu.style.display = 'none';
+            speedMenu.style.display = 'none';
+            if (sponsorMenu) {
+                sponsorMenu.style.display = 'none';
+                if (sponsorBtn) sponsorBtn.setAttribute('aria-expanded', 'false');
+            }
+            if (audioTrackMenu.style.display === 'none') {
+                buildAudioTrackChoices(audioTrackMenu, player, chooseAudioTrack);
+                if (IS_IOS) showMobilePageOverlay(audioTrackMenu, audioTrackBtn, 520, 4);
+                else placeDesktopAnchoredMenu(audioTrackMenu, { maxHeight: 0.6, gap: '4px' });
+                audioTrackMenu.style.display = 'block';
+                if (IS_IOS) fitMobilePageOverlay(audioTrackMenu);
+            } else {
+                audioTrackMenu.style.display = 'none';
+            }
+        });
+        function onAudioTrackOutsideClick() { audioTrackMenu.style.display = 'none'; }
+        document.addEventListener('click', onAudioTrackOutsideClick);
+        registerCleanup(function () {
+            document.removeEventListener('click', onAudioTrackOutsideClick);
+            removeMobilePageOverlay(audioTrackMenu);
+        });
+        audioTrackWrap.appendChild(audioTrackBtn);
+        audioTrackWrap.appendChild(audioTrackMenu);
+        playbackRow.appendChild(audioTrackWrap);
+        updateAudioTrackBtn();
+
+        // Update the quality, live, and audio-track labels periodically. Store
+        // the timer on the toolbar so it can be cleared when the toolbar is
+        // rebuilt (avoids a leak across video-element re-creation).
+        toolbar._wblockQualityTimer = setInterval(function () {
+            updateQualityBtn();
+            updateLiveBtn();
+            updateAudioTrackBtn();
+            if (!IS_IOS) updateTheaterBtn();
+        }, 2000);
         registerCleanup(function () {
             if (toolbar._wblockQualityTimer) {
                 clearInterval(toolbar._wblockQualityTimer);
@@ -5658,6 +5970,7 @@
             e.stopPropagation();
             qualityMenu.style.display = 'none';
             speedMenu.style.display = 'none';
+            audioTrackMenu.style.display = 'none';
             if (sponsorMenu.style.display === 'none') {
                 buildSponsorMenu();
                 if (IS_IOS) {
@@ -5713,6 +6026,7 @@
         speedBtn.addEventListener('click', function (e) {
             e.stopPropagation();
             qualityMenu.style.display = 'none';
+            audioTrackMenu.style.display = 'none';
             if (sponsorMenu) {
                 sponsorMenu.style.display = 'none';
                 if (sponsorBtn) sponsorBtn.setAttribute('aria-expanded', 'false');

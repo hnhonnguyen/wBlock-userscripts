@@ -8,13 +8,14 @@ Standalone userscripts maintained for wBlock. The raw `main` branch is the updat
 
 ## Fork additions (hnhonnguyen)
 
-This fork of Tube Cleaner adds playback controls on YouTube watch pages and a quality control for Shorts:
+This fork of Tube Cleaner adds playback and audio controls on YouTube watch pages and Shorts:
 
 - **Speed pill** (`1x`): choose a playback rate; it is saved and applied to every video.
+- **Audio track pill** (`EN` / `VI`): appears when YouTube exposes dubbed audio tracks. Pick a language and it is remembered for later videos; `Auto` returns to the default track.
 - **Auto next pill** (`Auto next`): advances to the next video when playback ends. On by default; click to toggle.
 - **Prev / Next pills**: jump to the previous or next video. Previous prefers YouTube's playlist button, then falls back to the videos watched in this tab.
-- **Smart controls**: the full toolbar stays collapsed behind a small `⋯` handle. Tap the video or the handle to open it; it fades back after a few seconds, including when paused. On desktop it no longer opens just from moving the mouse. iPhone uses one compact row (`quality`, `speed`, `‹`, `›`, `SB`); Auto next now lives as a checkbox in the SB panel.
-- **Shorts controls**: mobile web Shorts has no quality menu and starts around 360p. Compact pills at the top-right expose quality, speed, and a PiP toggle; saved quality and speed apply automatically, and background playback plus auto-PiP work while the reel player stays stock.
+- **Smart controls**: the full toolbar stays collapsed behind a small `⋯` handle. Tap the video or the handle to open it; it fades back after a few seconds, including when paused. On desktop it no longer opens just from moving the mouse. iPhone uses one compact row (`quality`, `audio-track` when available, `speed`, `‹`, `›`, `SB`); Auto next now lives as a checkbox in the SB panel.
+- **Shorts controls**: mobile web Shorts has no quality menu and starts around 360p. Compact pills at the top-right expose quality, speed, audio track when available, and a PiP toggle; saved quality, speed, and language apply automatically, and background playback plus auto-PiP work while the reel player stays stock.
 
 The fork declares `@grant none` on purpose. wBlock injects userscripts that request GM storage into the content world unless they are the upstream Tube Cleaner URL, and background playback needs the page world. SponsorBlock preferences fall back to `localStorage`. If you use wBlock, disable the built-in Tube Cleaner rather than deleting it; wBlock re-adds missing built-ins.
 
